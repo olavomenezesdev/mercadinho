@@ -48,6 +48,7 @@ def dados_iniciais():
 
 class EstoqueTests(unittest.TestCase):
     def setUp(self):
+        app_module.limpar_cache_usuarios()
         # As falhas simuladas geram logs de erro esperados; silenciamos para a saída ficar limpa.
         logging.getLogger('mercadinho').disabled = True
         self.addCleanup(setattr, logging.getLogger('mercadinho'), 'disabled', False)
@@ -480,6 +481,48 @@ class EstoqueTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(self.saidas(), [])
+
+
+    # --- Desempenho: cada tabela é lida uma vez por chamada e o usuário do token fica em cache ---
+
+    def contar_consultas(self):
+        chamadas = []
+        original = self.db.table
+
+        def table(nome):
+            chamadas.append(nome)
+            return original(nome)
+
+        self.db.table = table
+        self.addCleanup(setattr, self.db, 'table', original)
+        return chamadas
+
+    def test_lista_de_movimentacoes_le_cada_tabela_uma_vez(self):
+        chamadas = self.contar_consultas()
+        response = self.client.get('/api/movimentacoes', headers=self.owner_headers)
+        self.assertEqual(response.status_code, 200)
+        for tabela in ('movimentacao', 'produto', 'categoria', 'lote', 'fornecedor', 'usuario'):
+            self.assertEqual(chamadas.count(tabela), 1, tabela)
+
+    def test_lista_de_produtos_nao_repete_consultas(self):
+        chamadas = self.contar_consultas()
+        response = self.client.get('/api/produtos', headers=self.owner_headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(chamadas.count('produto'), 1)
+        self.assertEqual(chamadas.count('lote'), 1)
+        self.assertEqual(chamadas.count('categoria'), 1)
+
+    def test_usuario_do_token_fica_em_cache_entre_chamadas(self):
+        chamadas = self.contar_consultas()
+        self.client.get('/api/categorias', headers=self.owner_headers)
+        self.client.get('/api/categorias', headers=self.owner_headers)
+        self.assertEqual(chamadas.count('usuario'), 1)
+
+    def test_usuario_inativado_pelo_dono_perde_o_acesso_na_hora(self):
+        self.assertEqual(self.client.get('/api/produtos', headers=self.cashier_headers).status_code, 200)
+        resposta = self.client.put('/api/usuarios/2', json={'ativo': False}, headers=self.owner_headers)
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(self.client.get('/api/produtos', headers=self.cashier_headers).status_code, 401)
 
 
 if __name__ == '__main__':
