@@ -214,7 +214,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <div class="movement-item">
             <div class="movement-icon gold">=</div>
             <div class="movement-copy">
-              <strong>Saldo atual</strong>
+              <strong>Entradas menos vendas</strong>
               <span>${numberFormat(balance)}</span>
             </div>
             <em>unidades</em>
