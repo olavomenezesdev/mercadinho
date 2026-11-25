@@ -198,7 +198,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <div class="movement-item">
             <div class="movement-icon green">↑</div>
             <div class="movement-copy">
-              <strong>Entradas no período</strong>
+              <strong>Entradas</strong>
               <span>${numberFormat(entries)}</span>
             </div>
             <em>unidades</em>
@@ -206,7 +206,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <div class="movement-item">
             <div class="movement-icon red">↓</div>
             <div class="movement-copy">
-              <strong>Saídas no período</strong>
+              <strong>Vendas</strong>
               <span>${numberFormat(exits)}</span>
             </div>
             <em>unidades</em>
