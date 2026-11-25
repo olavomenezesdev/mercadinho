@@ -1,4 +1,4 @@
-import apiClient from '../services/api/client.js';
+import apiClient, { escapeHtml } from '../services/api/client.js';
 import { getSessionUser } from './session.js';
 
 (() => {
@@ -19,14 +19,6 @@ import { getSessionUser } from './session.js';
   let users = [];
   let editingUser = null;
   let currentStatusFilter = 'todos';
-
-  const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  })[character]);
 
   const apiRequest = async (path, options = {}) => {
     const response = await apiClient.fetch(path, options);

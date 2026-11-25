@@ -1,28 +1,14 @@
 # Camada de integração da API
 
-Este diretório foi preparado para receber a comunicação com o backend em Python.
+Todas as telas falam com o servidor Flask (`app.py`) por meio de `client.js`.
 
-## Estrutura prevista
-- `client.js` - cliente HTTP para chamar as rotas do backend.
-- `products.js` - CRUD de produtos.
-- `movements.js` - entradas, saídas e ajustes de estoque.
-- `alerts.js` - geração e consulta de alertas.
-- `reports.js` - relatórios e exportações.
-- `types.js` - modelos compartilhados.
+## O que o `client.js` faz
+- Envia o token no cabeçalho `Authorization: Bearer` em toda chamada para `/api/*`, exceto o login.
+- Guarda o token em `localStorage.mercadinho_token` e os dados do usuário (`nome`, `login`, `perfil` e `permissoes`) em `localStorage.mercadinho_usuario`.
+- Encerra a sessão e volta para o login quando a API responde 401.
+- Mostra uma mensagem amigável quando a API responde 403 (tela não liberada).
 
 ## Padrão de integração
-- Usar `apiClient` de `client.js` para chamadas às rotas Python. Ele envia o token Bearer, encerra sessões inválidas em respostas 401 e apresenta mensagens amigáveis para respostas 403.
-- Guardar o token em `localStorage.mercadinho_token` e os dados do usuário (`nome`, `login`, `perfil` e `permissoes`) em `localStorage.mercadinho_usuario`.
-- Tratar `loading`, `error` e `empty state` no front-end.
-- Manter regras de negócio no backend: FEFO, validação de estoque mínimo e alertas.
-
-## Pontos de encaixe do projeto
-- A tela de `Produtos` deve consumir a rota de listagem de produtos.
-- A tela de `Entradas` deve consumir a rota de movimentação por tipo `ENTRADA`.
-- A tela de `Saídas` deve consumir a rota de movimentação por tipo `SAIDA`.
-- O `Painel` deve consultar resumo geral e alertas ativos.
-- O `Relatórios` deve consumir dados agregados por categoria, validade e histórico.
-
-## Observação importante
-Os dados atuais foram removidos do protótipo para evitar mock e manter a interface limpa.
-O frontend ficou pronto para receber dados reais do Python assim que a API e o banco estiverem conectados.
+- Cada tela importa `apiClient` de `client.js` e chama as rotas diretamente, como `apiClient.fetch('/api/produtos')`.
+- As regras de negócio ficam no servidor: FEFO, cálculo de estoque, estoque mínimo, avisos de validade e permissões.
+- As rotas disponíveis estão documentadas em `docs/2-manter/api.md`.

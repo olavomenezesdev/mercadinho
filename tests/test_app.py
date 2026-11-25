@@ -17,6 +17,8 @@ class MercadinhoAppTests(unittest.TestCase):
         app.config['SECRET_KEY'] = 'test-only-secret-key'
 
         self.original_safe_query = app_module.safe_query
+        if app_module.supabase is None:
+            self.skipTest('Supabase não configurado no .env: testes integrados ignorados.')
         users = self.original_safe_query('usuario', '*')
         active_user = next((user for user in users if bool(user.get('ativo'))), None)
         if active_user is None:

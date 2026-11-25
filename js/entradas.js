@@ -1,5 +1,23 @@
-import apiClient, { getSessionUser, isOwner } from '../services/api/client.js';
+import apiClient, { escapeHtml, getSessionUser, isOwner } from '../services/api/client.js';
 import './session.js';
+
+// Data e hora no formato brasileiro (dd/mm/aaaa hh:mm), no fuso do navegador.
+const formatDateTime = (value) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+};
+
+// Data de hoje no fuso do navegador (horário de Brasília), não em UTC.
+const todayLocal = () => {
+  const now = new Date();
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0')
+  ].join('-');
+};
 
 const tbody = document.getElementById('entradas-table-body');
 const API_BASE_URL = window.location.origin || 'http://127.0.0.1:8000';
@@ -63,18 +81,19 @@ const updateEntryStats = async () => {
 
     const uniqueProducts = new Set(items.map((item) => item.id_produto)).size;
     const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
+    const totalValue = items.reduce((sum, item) => sum + Number(item.valor_total || 0), 0);
     const lastEntry = items.slice().sort((a, b) => new Date(b.data_movimentacao || 0) - new Date(a.data_movimentacao || 0))[0];
 
     cards[0].textContent = String(items.length);
     cards[1].textContent = String(uniqueProducts);
-    cards[2].textContent = Number(totalQuantity).toLocaleString('pt-BR');
-    cards[3].textContent = lastEntry ? new Date(lastEntry.data_movimentacao).toLocaleDateString('pt-BR') : '—';
+    cards[2].textContent = totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    cards[3].textContent = lastEntry ? formatDateTime(lastEntry.data_movimentacao).split(',')[0] : '—';
 
     const badges = document.querySelectorAll('.badge');
     if (badges.length) {
       badges[0].textContent = `${items.length} registros`;
       badges[1].textContent = `${uniqueProducts} produtos`;
-      badges[2].textContent = `Total ${Number(totalQuantity).toLocaleString('pt-BR')}`;
+      badges[2].textContent = `${Number(totalQuantity).toLocaleString('pt-BR')} unidades`;
       badges[3].textContent = lastEntry ? 'Atualizado' : 'Sem dados';
     }
   } catch (error) {
@@ -104,18 +123,23 @@ async function loadEntryReferences() {
 
     const productsData = await productsResponse.json();
     const suppliersData = await suppliersResponse.json();
-    const products = Array.isArray(productsData?.items) ? productsData.items : [];
+    // Entrada só para produtos ativos.
+    const products = (Array.isArray(productsData?.items) ? productsData.items : [])
+      .filter((item) => item?.ativo !== false);
     const suppliers = Array.isArray(suppliersData?.items) ? suppliersData.items : [];
 
     if (productSelect) {
       productSelect.innerHTML = '<option value="">Selecione o produto</option>' + products
-        .map((item) => `<option value="${item.id_produto}">${item.nome}</option>`)
+        .map((item) => `<option value="${escapeHtml(item.id_produto)}">${escapeHtml(item.nome)}</option>`)
         .join('');
     }
 
+    entrySupplierMap = new Map(suppliers.map((item) => [Number(item.id_fornecedor), item.nome || 'Fornecedor']));
+    renderSupplierFilterOptions(suppliers);
+
     if (fornecedorSelect) {
       fornecedorSelect.innerHTML = '<option value="">Selecione o fornecedor</option>' + suppliers
-        .map((item) => `<option value="${item.id_fornecedor}">${item.nome}</option>`)
+        .map((item) => `<option value="${escapeHtml(item.id_fornecedor)}">${escapeHtml(item.nome)}</option>`)
         .join('');
     }
   } catch (error) {
@@ -125,6 +149,26 @@ async function loadEntryReferences() {
 }
 
 let entrySupplierMap = new Map();
+
+// Opções do filtro "Fornecedor" com todos os fornecedores cadastrados
+// (inclusive inativos, que podem ter entradas antigas).
+const renderSupplierFilterOptions = (suppliers) => {
+  const supplierField = document.querySelector('[data-filter-key="fornecedor"]');
+  const filterMenu = supplierField?.querySelector('.filter-menu');
+  if (!supplierField || !filterMenu) return;
+
+  const current = supplierField.dataset.value || 'todos';
+  const ordered = suppliers
+    .slice()
+    .sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'));
+
+  filterMenu.innerHTML = `
+    <li class="filter-option${current === 'todos' ? ' selected' : ''}" data-filter-value="todos">Todos os fornecedores</li>
+    ${ordered.map((item) => `
+      <li class="filter-option${String(item.id_fornecedor) === current ? ' selected' : ''}" data-filter-value="${escapeHtml(item.id_fornecedor)}">${escapeHtml(item.nome || 'Fornecedor')}</li>
+    `).join('')}
+  `;
+};
 
 const getEntryFilterState = () => {
   const searchInput = document.getElementById('entry-search');
@@ -145,7 +189,7 @@ const applyEntryFilters = (items) => {
 
   return items.filter((item) => {
     const productName = item.produto || '';
-    const supplierName = entrySupplierMap.get(Number(item.id_fornecedor)) || item.fornecedor || '';
+    const supplierName = item.fornecedor || entrySupplierMap.get(Number(item.id_fornecedor)) || '';
     const haystack = [productName, supplierName, item.observacao, item.tipo].join(' ').toLowerCase();
     if (search && !haystack.includes(search)) {
       return false;
@@ -171,7 +215,6 @@ const applyEntryFilters = (items) => {
 const setupFilterDropdowns = () => {
   document.querySelectorAll('.select-field').forEach((field) => {
     const selectedValue = field.querySelector('.selected-value');
-    const options = field.querySelectorAll('.filter-option');
 
     const closeDropdown = () => {
       field.classList.remove('is-open');
@@ -186,7 +229,7 @@ const setupFilterDropdowns = () => {
         if (selectedValue) {
           selectedValue.textContent = label;
         }
-        options.forEach((item) => item.classList.toggle('selected', item === option));
+        field.querySelectorAll('.filter-option').forEach((item) => item.classList.toggle('selected', item === option));
         field.dataset.value = value;
         closeDropdown();
         if (typeof renderEntries === 'function') {
@@ -255,17 +298,17 @@ const renderEntries = async () => {
     const pageItems = filteredItems.slice(start, start + entryPageSize);
 
     tbody.innerHTML = pageItems.map((item) => {
-      const fornecedor = entrySupplierMap.get(Number(item.id_fornecedor)) || item.fornecedor || '—';
+      const fornecedor = item.fornecedor || entrySupplierMap.get(Number(item.id_fornecedor)) || '—';
       return `
         <tr>
-          <td>${item.data_movimentacao || '—'}</td>
-          <td>${item.produto || 'Produto'}</td>
-          <td>${item.quantidade || 0}</td>
-          <td>${fornecedor}</td>
+          <td>${escapeHtml(formatDateTime(item.data_movimentacao))}</td>
+          <td>${escapeHtml(item.produto || 'Produto')}</td>
+          <td>${escapeHtml(item.quantidade || 0)}</td>
+          <td>${escapeHtml(fornecedor)}</td>
           <td>R$ ${Number(item.valor_total || item.valor_unitario || item.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-          <td>${item.observacao || '—'}</td>
+          <td>${escapeHtml(item.observacao || '—')}</td>
           <td class="action-cell">
-            ${isOwner() ? `<button class="delete-movement-button" type="button" data-delete-movement="${item.id_movimentacao || ''}" aria-label="Excluir entrada">Excluir</button>` : ''}
+            ${isOwner() ? `<button class="delete-movement-button" type="button" data-delete-movement="${escapeHtml(item.id_movimentacao || '')}" aria-label="Excluir entrada">Excluir</button>` : ''}
           </td>
         </tr>
       `;
@@ -274,7 +317,7 @@ const renderEntries = async () => {
     tbody.querySelectorAll('[data-delete-movement]').forEach((button) => {
       button.addEventListener('click', async () => {
         const movementId = Number(button.dataset.deleteMovement);
-        const confirmed = await showConfirm('Deseja excluir esta entrada?');
+        const confirmed = await showConfirm('Excluir esta entrada? O lote criado por ela sai do estoque.');
         if (!movementId || !confirmed) {
           return;
         }
@@ -314,7 +357,7 @@ entryForm?.addEventListener('submit', async (event) => {
     id_produto: Number(productSelect?.value || 0),
     id_fornecedor: Number(fornecedorSelect?.value || 0),
     quantidade: document.getElementById('entry-quantity')?.value || 0,
-    data_entrada: document.getElementById('entry-date')?.value || new Date().toISOString().slice(0, 10),
+    data_entrada: document.getElementById('entry-date')?.value || todayLocal(),
     data_validade: document.getElementById('entry-validity')?.value || '',
     observacao: document.getElementById('entry-observation')?.value?.trim() || '',
     usuario: getSessionUser()?.login || 'operador'

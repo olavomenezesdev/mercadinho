@@ -1,5 +1,13 @@
-import apiClient from '../services/api/client.js';
+import apiClient, { escapeHtml } from '../services/api/client.js';
 import './session.js';
+
+// Data e hora no formato brasileiro (dd/mm/aaaa hh:mm), no fuso do navegador.
+const formatDateTime = (value) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+};
 
 const API_BASE_URL = window.location.origin || 'http://127.0.0.1:8000';
 const painelTableBody = document.getElementById('painel-table-body');
@@ -86,7 +94,7 @@ const updatePanelStats = async () => {
     cards[0].textContent = String(movements.length);
     cards[1].textContent = String(entradas.length);
     cards[2].textContent = String(saidas.length);
-    cards[3].textContent = lastMovement ? new Date(lastMovement.data_movimentacao).toLocaleDateString('pt-BR') : '—';
+    cards[3].textContent = lastMovement ? formatDateTime(lastMovement.data_movimentacao).split(',')[0] : '—';
 
     const badgeNodes = document.querySelectorAll('.mini-tag');
     badgeNodes[0].textContent = `${movements.length} registradas`;
@@ -152,7 +160,10 @@ const renderMovementRows = async () => {
 
   try {
     const { movements } = await waitForPanelData();
-    const filteredItems = applyPanelFilters(movements);
+    // Mais recentes primeiro.
+    const filteredItems = applyPanelFilters(movements)
+      .slice()
+      .sort((a, b) => new Date(b.data_movimentacao || 0) - new Date(a.data_movimentacao || 0));
 
     if (!filteredItems.length) {
       painelTableBody.innerHTML = `
@@ -173,15 +184,15 @@ const renderMovementRows = async () => {
       const produto = item.produto || item.id_produto || 'Produto';
       const quantidade = item.quantidade || 0;
       const observacao = item.observacao || '—';
-      const dataMovimentacao = item.data_movimentacao || item.data || '—';
+      const dataMovimentacao = formatDateTime(item.data_movimentacao || item.data);
 
       return `
         <tr>
-          <td>${dataMovimentacao}</td>
-          <td><span class="tag ${tipo === 'SAIDA' ? 'saida' : 'entrada'}">${tipo}</span></td>
-          <td>${produto}</td>
-          <td>${quantidade}</td>
-          <td>${observacao}</td>
+          <td>${escapeHtml(dataMovimentacao)}</td>
+          <td><span class="tag ${tipo === 'SAIDA' ? 'saida' : 'entrada'}">${escapeHtml(tipo)}</span></td>
+          <td>${escapeHtml(produto)}</td>
+          <td>${escapeHtml(quantidade)}</td>
+          <td>${escapeHtml(observacao)}</td>
           <td class="arrow-col">→</td>
         </tr>
       `;

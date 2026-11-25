@@ -114,7 +114,6 @@ button {
 
 .nav-icon,
 .stat-icon,
-.filter-icon,
 .logout-icon {
   width: 20px;
   height: 20px;
@@ -125,7 +124,6 @@ button {
 }
 
 .nav-icon svg,
-.filter-icon svg,
 .logout-icon svg,
 .stat-icon svg {
   width: 20px;
@@ -235,131 +233,6 @@ button {
   grid-template-columns: repeat(4, minmax(150px, 1fr));
   gap: 15px;
   margin-bottom: 28px;
-}
-
-.filters {
-  display: grid;
-  grid-template-columns: minmax(240px, 2fr) repeat(3, minmax(150px, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.search-box,
-.mini-field {
-  height: 42px;
-  border: 1px solid var(--field-border);
-  background: #fff;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  color: #8a8a8a;
-  font-size: 14px;
-  box-sizing: border-box;
-}
-
-.search-box {
-  min-width: 240px;
-}
-
-.search-box input {
-  flex: 1;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 14px;
-}
-
-.search-box input::placeholder {
-  color: #8a8a8a;
-}
-
-.mini-field {
-  min-width: 120px;
-  justify-content: space-between;
-  color: #7f7f7f;
-}
-
-.date-field {
-  min-width: 150px;
-  cursor: pointer;
-}
-
-.date-field input {
-  flex: 1;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.date-field input::-webkit-calendar-picker-indicator {
-  cursor: pointer;
-  opacity: 0.8;
-}
-
-.select-field {
-  position: relative;
-  justify-content: space-between;
-  min-width: 180px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.select-field .selected-value {
-  flex: 1;
-  min-width: 0;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.select-field .chevron,
-.select-field .filter-icon.without-space {
-  flex-shrink: 0;
-}
-
-.filter-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  right: 0;
-  margin: 0;
-  padding: 8px 0;
-  list-style: none;
-  display: none;
-  background: var(--white);
-  border: 1px solid var(--field-border);
-  border-radius: 8px;
-  box-shadow: 0 12px 20px rgba(20, 16, 14, 0.08);
-  z-index: 20;
-}
-
-.select-field.is-open .filter-menu {
-  display: block;
-}
-
-.filter-option {
-  padding: 10px 12px;
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.filter-option:hover,
-.filter-option.selected {
-  background: #f5efe9;
-  color: var(--primary);
-}
-
-.chevron {
-  font-size: 18px;
-  color: var(--text);
 }
 
 .stat-card {
@@ -875,11 +748,6 @@ button {
   .page-header {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .date-picker {
-    width: 100%;
-    min-width: 0;
   }
 }
 

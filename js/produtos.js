@@ -1,4 +1,4 @@
-import apiClient from '../services/api/client.js';
+import apiClient, { escapeHtml } from '../services/api/client.js';
 import './session.js';
 
 const tbody = document.getElementById('produtos-table-body');
@@ -86,20 +86,22 @@ const updateProductsStats = async () => {
     const payload = await readProductApiResponse(response, 'Não foi possível carregar os dados dos produtos.');
     const items = Array.isArray(payload?.items) ? payload.items : [];
 
-    const lowStock = items.filter((item) => Number(item.estoque_atual || 0) <= Number(item.estoque_minimo || 0)).length;
-    const active = items.filter((item) => item.ativo !== false).length;
+    const activeItems = items.filter((item) => item.ativo !== false);
+    const lowStock = activeItems.filter((item) => Number(item.estoque_atual || 0) <= Number(item.estoque_minimo || 0)).length;
+    const expiring = activeItems.filter((item) => item.alerta_validade === true).length;
+    const inactive = items.length - activeItems.length;
 
     cards[0].textContent = String(items.length);
     cards[1].textContent = String(lowStock);
-    cards[2].textContent = String(items.filter((item) => item.ativo !== false).length);
-    cards[3].textContent = String(active > 0 ? 'Ativos' : 'Sem dados');
+    cards[2].textContent = String(expiring);
+    cards[3].textContent = String(inactive);
 
     const badges = document.querySelectorAll('.badge');
     if (badges.length) {
-      badges[0].textContent = `${items.length} produtos`;
+      badges[0].textContent = `${activeItems.length} ativos`;
       badges[1].textContent = lowStock ? `${lowStock} em baixa` : 'Sem baixa';
-      badges[2].textContent = active ? `${active} ativos` : 'Sem dados';
-      badges[3].textContent = items.length ? 'Em dia' : 'Sem dados';
+      badges[2].textContent = expiring ? `${expiring} com aviso` : 'Em dia';
+      badges[3].textContent = inactive ? `${inactive} inativos` : 'Nenhum';
     }
   } catch (error) {
     cards.forEach((node) => {
@@ -183,7 +185,7 @@ async function loadCategories() {
   if (categorySelect) {
     categorySelect.innerHTML = '<option value="">Selecione</option>' + items
       .filter((item) => item?.ativo !== false)
-      .map((item) => `<option value="${item.id_categoria}">${item.nome}</option>`)
+      .map((item) => `<option value="${escapeHtml(item.id_categoria)}">${escapeHtml(item.nome)}</option>`)
       .join('');
   }
 
@@ -193,7 +195,7 @@ async function loadCategories() {
     const activeItems = items.filter((item) => item?.ativo !== false);
     filterMenu.innerHTML = `
       <li class="filter-option selected" data-filter-value="todos">Categoria</li>
-      ${activeItems.map((item) => `<li class="filter-option" data-filter-value="${item.id_categoria}">${item.nome}</li>`).join('')}
+      ${activeItems.map((item) => `<li class="filter-option" data-filter-value="${escapeHtml(item.id_categoria)}">${escapeHtml(item.nome)}</li>`).join('')}
     `;
     categoryField.dataset.value = 'todos';
     const selectedValue = categoryField.querySelector('.selected-value');
@@ -238,12 +240,8 @@ const applyProductFilters = (items) => {
     const estoqueAtual = Number(item.estoque_atual ?? 0);
     const estoqueMinimo = Number(item.estoque_minimo ?? 0);
     const isLowStock = estoqueAtual <= estoqueMinimo;
-    const isExpiring = !!item.data_validade && (() => {
-      const now = new Date();
-      const date = new Date(`${item.data_validade}T00:00:00`);
-      const diffDays = Math.ceil((date - now) / (1000 * 60 * 60 * 24));
-      return diffDays >= 0 && diffDays <= 30;
-    })();
+    // O servidor marca o produto quando um lote com saldo vence dentro do prazo de aviso (ou já venceu).
+    const isExpiring = item.alerta_validade === true;
 
     if (status === 'ativo' && item.ativo === false) {
       return false;
@@ -362,14 +360,14 @@ const renderProducts = async () => {
 
       return `
         <tr>
-          <td><span class="product-cell"><span class="product-thumb"></span>${nome}</span></td>
-          <td>${item.codigo_barras || '—'}</td>
+          <td><span class="product-cell"><span class="product-thumb"></span>${escapeHtml(nome)}</span></td>
+          <td>${escapeHtml(item.codigo_barras || '—')}</td>
           <td>${estoqueAtual}</td>
           <td>R$ ${preco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
           <td><span class="product-tag ${status === 'Ativo' ? 'positive' : 'warning'}">${status}</span></td>
-          <td>${categoria}</td>
+          <td>${escapeHtml(categoria)}</td>
           <td class="action-cell">
-            <button class="edit-product-button" type="button" data-edit-product="${item.id_produto}" aria-label="Editar produto ${nome}">✎</button>
+            <button class="edit-product-button" type="button" data-edit-product="${escapeHtml(item.id_produto)}" aria-label="Editar produto ${escapeHtml(nome)}">✎</button>
           </td>
         </tr>
       `;

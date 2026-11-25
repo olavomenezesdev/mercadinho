@@ -1,4 +1,4 @@
-import apiClient, { getSessionUser } from '../services/api/client.js';
+import apiClient, { escapeHtml, getSessionUser } from '../services/api/client.js';
 import './session.js';
 
 const barcodeInput = document.getElementById('barcode-input');
@@ -22,6 +22,10 @@ let selectedMethod = 'DINHEIRO';
 let selectedProduct = null;
 let productCatalog = [];
 let productCatalogLoading = false;
+let saleInProgress = false;
+
+// O caixa só vende produtos ativos.
+const isActiveProduct = (item) => item?.ativo !== false;
 
 const formatMoney = (value) => {
   const number = Number(value || 0);
@@ -102,11 +106,11 @@ const renderCart = () => {
       <tr>
         <td>
           <div class="cart-item-name">
-            <strong>${item.nome}</strong>
-            <span>${item.codigo_barras || 'Sem código'}</span>
+            <strong>${escapeHtml(item.nome)}</strong>
+            <span>${escapeHtml(item.codigo_barras || 'Sem código')}</span>
           </div>
         </td>
-        <td>${item.quantidade}</td>
+        <td>${escapeHtml(item.quantidade)}</td>
         <td>${formatMoney(item.preco)}</td>
         <td>${formatMoney(totalItem)}</td>
         <td><button class="checkout-remove" type="button" data-remove-item="${index}">Excluir</button></td>
@@ -160,9 +164,9 @@ const renderProductPreview = () => {
   productPreview.innerHTML = `
     <span class="preview-title">Produto selecionado</span>
     <div class="product-info">
-      <strong>${selectedProduct.nome}</strong>
-      <span>${selectedProduct.codigo_barras || 'Código sem código de barras'}</span>
-      <span>Estoque: ${selectedProduct.estoque_atual ?? 0} • ${formatMoney(selectedProduct.preco ?? 0)}</span>
+      <strong>${escapeHtml(selectedProduct.nome)}</strong>
+      <span>${escapeHtml(selectedProduct.codigo_barras || 'Código sem código de barras')}</span>
+      <span>Estoque: ${escapeHtml(selectedProduct.estoque_atual ?? 0)} • ${formatMoney(selectedProduct.preco ?? 0)}</span>
     </div>
   `;
 };
@@ -181,7 +185,7 @@ const loadProductCatalog = async () => {
   try {
     const response = await fetchJsonWithTimeout(`${API_BASE_URL}/api/produtos`, { method: 'GET' }, 15000);
     const payload = await response.json();
-    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const items = (Array.isArray(payload?.items) ? payload.items : []).filter(isActiveProduct);
     productCatalog = items;
     return items;
   } catch (error) {
@@ -212,7 +216,7 @@ const fetchProductByBarcode = async () => {
         20000
       );
       const payload = await response.json();
-      items = Array.isArray(payload?.items) ? payload.items : [];
+      items = (Array.isArray(payload?.items) ? payload.items : []).filter(isActiveProduct);
       if (items.length) {
         productCatalog = items;
       }
@@ -345,43 +349,46 @@ const clearCart = async () => {
 };
 
 const finalizeSale = async () => {
+  // Trava contra clique duplo: enquanto a venda é enviada, novos cliques são ignorados.
+  if (saleInProgress) {
+    return;
+  }
+
   if (!cart.length) {
     window.alert('Adicione ao menos um item para finalizar a venda.');
     return;
   }
 
-  const usuario = getSessionUser()?.login || 'operador';
+  saleInProgress = true;
+  if (finalizeSaleButton) finalizeSaleButton.disabled = true;
 
   try {
-    const sales = cart.map((item) => ({
-      tipo: 'SAIDA',
-      id_produto: item.id_produto,
-      quantidade: item.quantidade,
-      motivo: 'venda',
-      observacao: `Venda via caixa - ${selectedMethod}`,
-      usuario
-    }));
+    // Uma única chamada: o servidor grava a venda inteira ou não grava nada.
+    const response = await apiClient.fetch(`${API_BASE_URL}/api/vendas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itens: cart.map((item) => ({
+          id_produto: item.id_produto,
+          quantidade: item.quantidade
+        })),
+        forma_pagamento: selectedMethod
+      })
+    });
 
-    const results = [];
-    for (const move of sales) {
-      const response = await apiClient.fetch(`${API_BASE_URL}/api/movimentacoes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(move)
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Não foi possível registrar a venda.');
-      }
-      results.push(data);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || 'Não foi possível registrar a venda.');
     }
 
-    window.alert('Venda concluída com sucesso.');
+    window.alert(data.message || 'Venda concluída com sucesso.');
     cart.length = 0;
     renderCart();
   } catch (error) {
     window.alert(error.message || 'Erro ao finalizar a venda.');
+  } finally {
+    saleInProgress = false;
+    if (finalizeSaleButton) finalizeSaleButton.disabled = false;
   }
 };
 

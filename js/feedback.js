@@ -41,12 +41,15 @@ function showConfirm(message) {
 
     dialog.innerHTML = `
       <div class="app-feedback-title">Confirmação</div>
-      <p class="app-feedback-message">${message}</p>
+      <p class="app-feedback-message"></p>
       <div class="app-feedback-actions">
         <button type="button" class="app-feedback-button app-feedback-button--secondary" data-action="cancel">Cancelar</button>
         <button type="button" class="app-feedback-button app-feedback-button--primary" data-action="confirm">Confirmar</button>
       </div>
     `;
+
+    // Texto colocado com textContent: nunca é interpretado como HTML.
+    dialog.querySelector('.app-feedback-message').textContent = String(message ?? '');
 
     const close = (result) => {
       backdrop.remove();
@@ -76,9 +79,9 @@ function showPrompt(message, defaultValue = '') {
 
     dialog.innerHTML = `
       <div class="app-feedback-title">Digite sua senha</div>
-      <p class="app-feedback-message">${message}</p>
+      <p class="app-feedback-message"></p>
       <label class="app-feedback-field" for="app-feedback-input">
-        <input id="app-feedback-input" type="password" value="${defaultValue}" autocomplete="off" />
+        <input id="app-feedback-input" type="password" autocomplete="off" />
       </label>
       <div class="app-feedback-actions">
         <button type="button" class="app-feedback-button app-feedback-button--secondary" data-action="cancel">Cancelar</button>
@@ -87,6 +90,9 @@ function showPrompt(message, defaultValue = '') {
     `;
 
     const input = dialog.querySelector('#app-feedback-input');
+    // Texto e valor colocados sem innerHTML: nunca são interpretados como HTML.
+    dialog.querySelector('.app-feedback-message').textContent = String(message ?? '');
+    input.value = String(defaultValue ?? '');
     const close = (value) => {
       backdrop.remove();
       resolve(value);

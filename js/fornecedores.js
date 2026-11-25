@@ -1,4 +1,4 @@
-import apiClient from '../services/api/client.js';
+import apiClient, { escapeHtml } from '../services/api/client.js';
 import './session.js';
 
 const tbody = document.getElementById('fornecedores-table-body');
@@ -11,6 +11,25 @@ const supplierDeleteButton = document.getElementById('supplier-delete-button');
 const supplierPageSize = 10;
 let currentSupplierPage = 1;
 let editingSupplierId = null;
+
+// Mensagem de erro dentro do modal (ex.: "Já existe um fornecedor com este telefone.").
+const showSupplierFormError = (message) => {
+  const errorBox = document.getElementById('supplier-form-error');
+  if (!errorBox) {
+    window.alert(message);
+    return;
+  }
+  errorBox.textContent = message;
+  errorBox.hidden = false;
+};
+
+const clearSupplierFormError = () => {
+  const errorBox = document.getElementById('supplier-form-error');
+  if (errorBox) {
+    errorBox.textContent = '';
+    errorBox.hidden = true;
+  }
+};
 
 const renderSupplierPagination = (totalItems) => {
   const pagination = document.querySelector('.table-footer .pagination');
@@ -63,19 +82,25 @@ const updateSupplierStats = async () => {
 
     const activeCount = items.filter((item) => item.ativo !== false).length;
     const inactiveCount = items.length - activeCount;
-    const lastCreated = items.slice().sort((a, b) => new Date(b.id_fornecedor || 0) - new Date(a.id_fornecedor || 0))[0];
+    // "Último cadastro" usa a coluna created_at. Sem ela no banco, mostra "—" (não inventa data).
+    const withDate = items
+      .map((item) => ({ item, date: item.created_at ? new Date(item.created_at) : null }))
+      .filter(({ date }) => date && !Number.isNaN(date.getTime()));
+    const lastCreated = withDate.sort((a, b) => b.date - a.date)[0] || null;
 
     cards[0].textContent = String(items.length);
     cards[1].textContent = String(inactiveCount);
     cards[2].textContent = String(activeCount);
-    cards[3].textContent = lastCreated ? 'Cadastrado' : '—';
+    cards[3].textContent = lastCreated ? lastCreated.date.toLocaleDateString('pt-BR') : '—';
 
     const badges = document.querySelectorAll('.badge');
     if (badges.length) {
       badges[0].textContent = `${items.length} fornecedores`;
       badges[1].textContent = inactiveCount ? `${inactiveCount} inativos` : 'Sem inativos';
       badges[2].textContent = activeCount ? `${activeCount} ativos` : 'Sem ativos';
-      badges[3].textContent = lastCreated ? 'Atualizado' : 'Sem dados';
+      badges[3].textContent = lastCreated
+        ? (lastCreated.item.nome || 'Fornecedor')
+        : (items.length ? 'Sem data de cadastro' : 'Sem dados');
     }
   } catch (error) {
     cards.forEach((node) => {
@@ -88,6 +113,7 @@ const openSupplierModal = (supplier = null) => {
   const title = document.getElementById('supplier-title');
   const subtitle = document.getElementById('supplier-subtitle');
   const submitButton = document.getElementById('supplier-submit-button');
+  clearSupplierFormError();
 
   if (supplier) {
     editingSupplierId = supplier.id_fornecedor;
@@ -122,6 +148,7 @@ const closeSupplierModal = () => {
   supplierModal && (supplierModal.style.display = 'none');
   editingSupplierId = null;
   supplierForm?.reset();
+  clearSupplierFormError();
 
   const title = document.getElementById('supplier-title');
   const subtitle = document.getElementById('supplier-subtitle');
@@ -255,12 +282,12 @@ const renderSuppliers = async () => {
       const tagClass = status === 'Ativo' ? 'positive' : 'warning';
       return `
         <tr>
-          <td><span class="product-cell"><span class="product-thumb"></span>${item.nome || 'Fornecedor'}</span></td>
-          <td>${item.telefone || '—'}</td>
-          <td>${item.email || '—'}</td>
+          <td><span class="product-cell"><span class="product-thumb"></span>${escapeHtml(item.nome || 'Fornecedor')}</span></td>
+          <td>${escapeHtml(item.telefone || '—')}</td>
+          <td>${escapeHtml(item.email || '—')}</td>
           <td><span class="product-tag ${tagClass}">${status}</span></td>
           <td class="action-cell">
-            <button class="edit-product-button" type="button" data-edit-supplier="${item.id_fornecedor}" aria-label="Editar fornecedor ${item.nome || 'fornecedor'}">✎</button>
+            <button class="edit-product-button" type="button" data-edit-supplier="${escapeHtml(item.id_fornecedor)}" aria-label="Editar fornecedor ${escapeHtml(item.nome || 'fornecedor')}">✎</button>
           </td>
         </tr>
       `;
@@ -297,8 +324,9 @@ supplierForm?.addEventListener('submit', async (event) => {
     ativo: document.getElementById('supplier-active')?.checked ?? true
   };
 
+  clearSupplierFormError();
   if (!payload.nome) {
-    window.alert('Informe o nome do fornecedor antes de salvar.');
+    showSupplierFormError('Informe o nome do fornecedor antes de salvar.');
     return;
   }
 
@@ -323,7 +351,7 @@ supplierForm?.addEventListener('submit', async (event) => {
     await updateSupplierStats();
     await renderSuppliers();
   } catch (error) {
-    window.alert(error.message || 'Erro ao salvar fornecedor.');
+    showSupplierFormError(error.message || 'Erro ao salvar fornecedor.');
   }
 });
 
@@ -357,7 +385,7 @@ const initializeSupplierModal = () => {
       await updateSupplierStats();
       await renderSuppliers();
     } catch (error) {
-      window.alert(error.message || 'Erro ao inativar fornecedor.');
+      showSupplierFormError(error.message || 'Erro ao inativar fornecedor.');
     }
   });
 

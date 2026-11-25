@@ -6,6 +6,19 @@ const TOKEN_STORAGE_KEY = 'mercadinho_token';
 const USER_STORAGE_KEY = 'mercadinho_usuario';
 const FORBIDDEN_MESSAGE = 'Você não tem permissão para acessar esta tela.';
 
+const HTML_ESCAPES = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;'
+};
+
+// Use em todo texto vindo da API antes de colocar em innerHTML (inclusive em atributos).
+export function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => HTML_ESCAPES[character]);
+}
+
 export function getSessionUser() {
   const savedUser = localStorage.getItem(USER_STORAGE_KEY);
   if (!savedUser) {

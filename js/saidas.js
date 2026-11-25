@@ -1,5 +1,13 @@
-import apiClient, { getSessionUser, isOwner } from '../services/api/client.js';
+import apiClient, { escapeHtml, getSessionUser, isOwner } from '../services/api/client.js';
 import './session.js';
+
+// Data e hora no formato brasileiro (dd/mm/aaaa hh:mm), no fuso do navegador.
+const formatDateTime = (value) => {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+};
 
 const tbody = document.getElementById('saidas-table-body');
 const API_BASE_URL = window.location.origin || 'http://127.0.0.1:8000';
@@ -62,18 +70,19 @@ const updateExitStats = async () => {
 
     const uniqueProducts = new Set(items.map((item) => item.id_produto)).size;
     const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
+    const totalValue = items.reduce((sum, item) => sum + Number(item.valor_total || 0), 0);
     const lastExit = items.slice().sort((a, b) => new Date(b.data_movimentacao || 0) - new Date(a.data_movimentacao || 0))[0];
 
     cards[0].textContent = String(items.length);
     cards[1].textContent = String(uniqueProducts);
-    cards[2].textContent = Number(totalQuantity).toLocaleString('pt-BR');
-    cards[3].textContent = lastExit ? new Date(lastExit.data_movimentacao).toLocaleDateString('pt-BR') : '—';
+    cards[2].textContent = totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    cards[3].textContent = lastExit ? formatDateTime(lastExit.data_movimentacao).split(',')[0] : '—';
 
     const badges = document.querySelectorAll('.mini-tag');
     if (badges.length) {
       badges[0].textContent = `${items.length} registros`;
       badges[1].textContent = `${uniqueProducts} produtos`;
-      badges[2].textContent = `Total ${Number(totalQuantity).toLocaleString('pt-BR')}`;
+      badges[2].textContent = `${Number(totalQuantity).toLocaleString('pt-BR')} unidades`;
       badges[3].textContent = lastExit ? 'Atualizado' : 'Sem dados';
     }
   } catch (error) {
@@ -100,10 +109,12 @@ async function loadExitReferenceProducts() {
   try {
     const response = await apiClient.fetch(`${API_BASE_URL}/api/produtos`);
     const payload = await response.json();
-    const items = Array.isArray(payload?.items) ? payload.items : [];
+    // Saída só para produtos ativos.
+    const items = (Array.isArray(payload?.items) ? payload.items : [])
+      .filter((item) => item?.ativo !== false);
 
     exitProductSelect.innerHTML = '<option value="">Selecione o produto</option>' + items
-      .map((item) => `<option value="${item.id_produto}">${item.nome}</option>`)
+      .map((item) => `<option value="${escapeHtml(item.id_produto)}">${escapeHtml(item.nome)}</option>`)
       .join('');
   } catch (error) {
     exitProductSelect.innerHTML = '<option value="">Erro ao carregar</option>';
@@ -239,14 +250,14 @@ const renderExits = async () => {
 
     tbody.innerHTML = pageItems.map((item) => `
       <tr>
-        <td>${item.data_movimentacao || '—'}</td>
-        <td>${item.motivo || item.observacao || 'Venda'}</td>
-        <td>${item.produto || 'Produto'}</td>
-        <td>${item.quantidade || 0}</td>
+        <td>${escapeHtml(formatDateTime(item.data_movimentacao))}</td>
+        <td>${escapeHtml(item.motivo || item.observacao || 'Venda')}</td>
+        <td>${escapeHtml(item.produto || 'Produto')}</td>
+        <td>${escapeHtml(item.quantidade || 0)}</td>
         <td>R$ ${Number(item.valor_total || item.valor_unitario || item.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        <td>${item.observacao || '—'}</td>
+        <td>${escapeHtml(item.observacao || '—')}</td>
         <td class="action-cell">
-          ${isOwner() ? `<button class="delete-movement-button" type="button" data-delete-movement="${item.id_movimentacao || ''}" aria-label="Excluir saída">Excluir</button>` : ''}
+          ${isOwner() ? `<button class="delete-movement-button" type="button" data-delete-movement="${escapeHtml(item.id_movimentacao || '')}" aria-label="Excluir saída">Excluir</button>` : ''}
         </td>
       </tr>
     `).join('');
@@ -254,7 +265,7 @@ const renderExits = async () => {
     tbody.querySelectorAll('[data-delete-movement]').forEach((button) => {
       button.addEventListener('click', async () => {
         const movementId = Number(button.dataset.deleteMovement);
-        const confirmed = await showConfirm('Deseja excluir esta saída?');
+        const confirmed = await showConfirm('Excluir esta saída? A quantidade volta para o estoque.');
         if (!movementId || !confirmed) {
           return;
         }

@@ -2,7 +2,7 @@
 
 Sistema web de **controle de estoque** para o Mercadinho Seu João: cadastro de produtos, entradas e saídas, controle de validade por lote, alertas e relatórios, com **níveis de usuário e permissões por tela**.
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-backend-000000?logo=flask&logoColor=white)
 ![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?logo=supabase&logoColor=white)
 
@@ -68,7 +68,7 @@ O banco de dados (Supabase) **já está configurado e é compartilhado por toda 
 
 ### Pré-requisitos
 
-- [Python 3.10 ou superior](https://www.python.org/downloads/) (marque a opção **Add Python to PATH** na instalação)
+- [Python 3.12 ou superior](https://www.python.org/downloads/) (marque a opção **Add Python to PATH** na instalação)
 - [Git](https://git-scm.com/)
 - Um editor de código, como o [VS Code](https://code.visualstudio.com/)
 
@@ -181,6 +181,7 @@ Como todos usam o **mesmo banco**, tenha cuidado: o que você cadastra, altera o
 
 - **Não apague nem altere dados reais** do banco sem avisar a equipe.
 - **Não rode a suíte de testes completa** contra o banco compartilhado: ela grava registros de teste nele.
+- Para testar sem tocar no banco, rode `python -m unittest tests.test_estoque tests.test_app.AuthenticationTests`. Esses testes usam um banco em memória (`tests/fake_supabase.py`).
 - Antes de começar a trabalhar, atualize o seu código:
 
   ```bash

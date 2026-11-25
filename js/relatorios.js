@@ -1,4 +1,4 @@
-import apiClient from '../services/api/client.js';
+import apiClient, { escapeHtml } from '../services/api/client.js';
 import './session.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -15,41 +15,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   const numberFormat = (value) =>
     new Intl.NumberFormat('pt-BR').format(Number(value || 0));
 
-  const getFilterState = () => ({
-    search: (document.getElementById('report-search')?.value || '').trim().toLowerCase(),
-    dateFrom: document.getElementById('report-date-from')?.value || '',
-    dateTo: document.getElementById('report-date-to')?.value || '',
-    type: document.querySelector('[data-filter-key="tipo-relatorio"]')?.dataset.value || 'todos'
-  });
+  // Data no fuso do navegador (horário de Brasília), não em UTC.
+  const localDateKey = (date) => [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0')
+  ].join('-');
 
-  const applyFilters = (items) => {
-    const { search, dateFrom, dateTo, type } = getFilterState();
-    return items.filter((item) => {
-      const haystack = [item.produto, item.nome, item.tipo, item.mensagem, item.categoria].join(' ').toLowerCase();
-      if (search && !haystack.includes(search)) {
-        return false;
-      }
+  const formatDateBR = (isoDate) => {
+    const [year, month, day] = String(isoDate || '').slice(0, 10).split('-');
+    return year && month && day ? `${day}/${month}/${year}` : '—';
+  };
 
-      const dateValue = item.data_movimentacao || item.data_validade || item.data_geracao || item.data;
-      if (dateValue) {
-        const itemDate = new Date(dateValue);
-        if (Number.isNaN(itemDate.getTime())) {
-          return false;
-        }
-        if (dateFrom && itemDate < new Date(`${dateFrom}T00:00:00`)) {
-          return false;
-        }
-        if (dateTo && itemDate > new Date(`${dateTo}T23:59:59`)) {
-          return false;
-        }
-      }
-
-      if (type !== 'todos' && item.tipo && String(item.tipo).toUpperCase() !== type.toUpperCase()) {
-        return false;
-      }
-
-      return true;
-    });
+  const ALERT_LABELS = {
+    ESTOQUE_BAIXO: 'Estoque baixo',
+    VALIDADE_PROXIMA: 'Validade próxima',
+    LOTE_VENCIDO: 'Lote vencido'
   };
 
   const getLast7Days = () => {
@@ -64,81 +45,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   const formatDay = (date) =>
     new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(date);
 
-  const attachReportFilters = () => {
-    document.getElementById('report-search')?.addEventListener('input', () => renderReports());
-    ['report-date-from', 'report-date-to'].forEach((id) => {
-      document.getElementById(id)?.addEventListener('change', () => renderReports());
-    });
-
-    document.querySelectorAll('.select-field').forEach((field) => {
-      const selectedValue = field.querySelector('.selected-value');
-      const options = field.querySelectorAll('.filter-option');
-
-      const closeDropdown = () => {
-        field.classList.remove('is-open');
-        field.setAttribute('aria-expanded', 'false');
-      };
-
-      field.addEventListener('click', (event) => {
-        const option = event.target.closest('.filter-option');
-        if (option) {
-          const label = option.textContent.trim();
-          const value = option.dataset.filterValue || option.textContent.trim().toLowerCase();
-          if (selectedValue) {
-            selectedValue.textContent = label;
-          }
-          options.forEach((item) => item.classList.toggle('selected', item === option));
-          field.dataset.value = value;
-          closeDropdown();
-          renderReports();
-          return;
-        }
-
-        const isOpen = field.classList.toggle('is-open');
-        field.setAttribute('aria-expanded', String(isOpen));
-      });
-
-      field.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          const isOpen = field.classList.toggle('is-open');
-          field.setAttribute('aria-expanded', String(isOpen));
-        }
-      });
-
-      document.addEventListener('click', (event) => {
-        if (!field.contains(event.target)) {
-          closeDropdown();
-        }
-      });
-    });
-  };
-
   const renderReports = async () => {
     try {
-      const [productsResponse, movementsResponse, alertsResponse, lotsResponse] = await Promise.all([
+      const [productsResponse, movementsResponse, alertsResponse] = await Promise.all([
         apiClient.fetch(`${API_BASE_URL}/api/produtos`),
         apiClient.fetch(`${API_BASE_URL}/api/movimentacoes`),
-        apiClient.fetch(`${API_BASE_URL}/api/alertas`),
-        apiClient.fetch(`${API_BASE_URL}/api/lotes`)
+        apiClient.fetch(`${API_BASE_URL}/api/alertas`)
       ]);
 
       const productsPayload = await productsResponse.json();
       const movementsPayload = await movementsResponse.json();
       const alertsPayload = await alertsResponse.json();
-      const lotsPayload = await lotsResponse.json();
 
-      let products = Array.isArray(productsPayload?.items) ? productsPayload.items : [];
-      let movements = Array.isArray(movementsPayload?.items) ? movementsPayload.items : [];
-      let alerts = Array.isArray(alertsPayload?.items) ? alertsPayload.items : [];
-      let lots = Array.isArray(lotsPayload?.items) ? lotsPayload.items : [];
+      // A tela usa sempre todos os dados (não há filtros nos relatórios).
+      const products = Array.isArray(productsPayload?.items) ? productsPayload.items : [];
+      const movements = Array.isArray(movementsPayload?.items) ? movementsPayload.items : [];
+      const alerts = Array.isArray(alertsPayload?.items) ? alertsPayload.items : [];
 
-      products = applyFilters(products);
-      movements = applyFilters(movements);
-      alerts = applyFilters(alerts);
-      lots = applyFilters(lots);
-
-      const salesMovements = movements.filter((item) => String(item.tipo || '').toUpperCase() === 'SAIDA');
+      // Vendas = saídas com motivo Venda (perdas, vencimentos e avarias não contam como venda).
+      const salesMovements = movements.filter((item) => (
+        String(item.tipo || '').toUpperCase() === 'SAIDA' && (item.motivo || 'Venda') === 'Venda'
+      ));
       const entriesMovements = movements.filter((item) => String(item.tipo || '').toUpperCase() === 'ENTRADA');
 
       const totalSalesUnits = salesMovements.reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
@@ -148,7 +75,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }, 0);
       const productsSold = new Set(salesMovements.map((item) => item.id_produto)).size;
       const avgTicket = salesMovements.length ? totalRevenue / salesMovements.length : 0;
-      const lowStockAlerts = products.filter((item) => Number(item.estoque_atual || 0) <= Number(item.estoque_minimo || 0));
+      const lowStockAlerts = products.filter((item) => (
+        item.ativo !== false && Number(item.estoque_atual || 0) <= Number(item.estoque_minimo || 0)
+      ));
 
       const statCards = document.querySelectorAll('.stat-card');
       if (statCards.length >= 4) {
@@ -169,26 +98,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (salesChart) {
         const sevenDays = getLast7Days();
         const maxValue = Math.max(1, ...sevenDays.map((date) => {
-          const key = date.toISOString().slice(0, 10);
+          const key = localDateKey(date);
           return salesMovements.filter((item) => {
             const movementDate = new Date(item.data_movimentacao || item.data || new Date());
-            return movementDate.toISOString().slice(0, 10) === key;
+            return localDateKey(movementDate) === key;
           }).reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
         }));
 
         salesChart.innerHTML = sevenDays.map((date) => {
-          const key = date.toISOString().slice(0, 10);
+          const key = localDateKey(date);
           const value = salesMovements.filter((item) => {
             const movementDate = new Date(item.data_movimentacao || item.data || new Date());
-            return movementDate.toISOString().slice(0, 10) === key;
+            return localDateKey(movementDate) === key;
           }).reduce((sum, item) => sum + Number(item.quantidade || 0), 0);
 
           const height = Math.max(14, (value / maxValue) * 100);
           return `
             <div class="bar-group">
-              <span class="bar-value">${value}</span>
+              <span class="bar-value">${escapeHtml(value)}</span>
               <div class="bar" style="height:${height}%"></div>
-              <span class="bar-label">${formatDay(date)}</span>
+              <span class="bar-label">${escapeHtml(formatDay(date))}</span>
             </div>
           `;
         }).join('');
@@ -219,7 +148,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         donutCenter.innerHTML = `<strong>${total}</strong><span>produtos</span>`;
         categoryLegend.innerHTML = entries.map(([name, value], index) => `
           <li>
-            <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot" style="background:${palette[index % palette.length]};"></span>${name}</span>
+            <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot" style="background:${palette[index % palette.length]};"></span>${escapeHtml(name)}</span>
             <strong>${Math.round((value / total) * 100)}%</strong>
           </li>
         `).join('');
@@ -227,16 +156,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const expirationTableBody = document.getElementById('expiration-table-body');
       if (expirationTableBody) {
-        const upcoming = lots
-          .filter((lot) => Number(lot.quantidade || 0) > 0 && lot.data_validade)
-          .map((lot) => {
-            const now = new Date();
-            const dueDate = new Date(`${lot.data_validade}T00:00:00`);
-            const daysLeft = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
-            return { ...lot, daysLeft };
-          })
-          .filter((lot) => lot.daysLeft >= 0 && lot.daysLeft <= 45)
-          .sort((a, b) => a.daysLeft - b.daysLeft)
+        // Mesma regra do servidor: lotes com saldo vencidos ou dentro do prazo de aviso.
+        const upcoming = (Array.isArray(alertsPayload?.items) ? alertsPayload.items : [])
+          .filter((alert) => alert.tipo === 'VALIDADE_PROXIMA' || alert.tipo === 'LOTE_VENCIDO')
+          .sort((a, b) => Number(a.dias_para_vencer ?? 0) - Number(b.dias_para_vencer ?? 0))
           .slice(0, 5);
 
         if (!upcoming.length) {
@@ -253,12 +176,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <td>
                   <span class="product-cell">
                     <span class="thumb thumb-1"></span>
-                    ${productName}
+                    ${escapeHtml(productName)}
                   </span>
                 </td>
-                <td>${lot.id_lote || 'Lote'}</td>
-                <td>${lot.data_validade}</td>
-                <td>${lot.quantidade}</td>
+                <td>${escapeHtml(lot.id_lote || 'Lote')}</td>
+                <td>${escapeHtml(formatDateBR(lot.validade))}${lot.tipo === 'LOTE_VENCIDO' ? ' (vencido)' : ''}</td>
+                <td>${numberFormat(lot.quantidade)}</td>
               </tr>
             `;
           }).join('');
@@ -307,8 +230,8 @@ document.addEventListener('DOMContentLoaded', async () => {
               <div class="alert-line">
                 <span class="alert-bullet"></span>
                 <div>
-                  <strong>${alert.tipo || 'ALERTA'}</strong>
-                  <p>${alert.mensagem || 'Produto com atenção.'}</p>
+                  <strong>${escapeHtml(ALERT_LABELS[alert.tipo] || alert.tipo || 'Alerta')}</strong>
+                  <p>${escapeHtml(alert.mensagem || 'Produto com atenção.')}</p>
                 </div>
               </div>
             `).join('')
@@ -329,6 +252,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
 
-  attachReportFilters();
   renderReports();
 });
