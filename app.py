@@ -747,13 +747,22 @@ def calculate_product_stock(product_id):
     return total
 
 
-def plan_fefo_exit(product_id, quantity):
+def lote_vencido(lot, today=None):
+    expiry = parse_date(lot.get('data_validade'))
+    return expiry is not None and expiry < (today or hoje())
+
+
+def plan_fefo_exit(product_id, quantity, ignorar_vencidos=False):
     """Plano de baixa FEFO: lista de (lote, quantidade usada), ou None sem saldo suficiente.
 
     Sai primeiro o lote que vence antes; lotes sem validade ficam por último.
+    Em vendas (ignorar_vencidos=True), lotes vencidos não entram: produto vencido não se vende.
     """
     remaining = parse_decimal(quantity)
     lots = safe_query('lote', '*', id_produto=int(product_id))
+    if ignorar_vencidos:
+        today = hoje()
+        lots = [lot for lot in lots if not lote_vencido(lot, today)]
     lots = sorted(
         lots,
         key=lambda item: (str(item.get('data_validade') or '9999-12-31'), item.get('id_lote', 0))
@@ -775,6 +784,28 @@ def plan_fefo_exit(product_id, quantity):
     if remaining > 0 or not plan:
         return None
     return plan
+
+
+def format_quantity(value):
+    """Quantidade para mensagens: 4 -> '4', 1.50 -> '1,5'."""
+    text = format(Decimal(value).normalize(), 'f')
+    return text.replace('.', ',')
+
+
+def mensagem_venda_sem_estoque(product_id, nome):
+    """Explica por que a venda não fecha; cita as unidades vencidas, se houver."""
+    vencidas = sum(
+        (lot_balance(lot) for lot in safe_query('lote', '*', id_produto=int(product_id))
+         if lot_balance(lot) > 0 and lote_vencido(lot)),
+        Decimal('0')
+    )
+    if vencidas <= 0:
+        return f'Estoque insuficiente para {nome}. Nada foi gravado.'
+    unidades = 'unidade vencida' if vencidas == 1 else 'unidades vencidas'
+    return (
+        f'Estoque insuficiente para {nome}: {format_quantity(vencidas)} {unidades} não podem ser vendidas. '
+        'Registre essas unidades em Saídas com motivo Vencimento. Nada foi gravado.'
+    )
 
 
 def normalize_exit_reason(raw_reason):
@@ -1609,9 +1640,13 @@ def create_movement():
         if quantidade > estoque_atual:
             return jsonify({'ok': False, 'message': 'Quantidade acima do disponível no estoque.'}), 400
 
-        plan = plan_fefo_exit(product_id, quantidade)
+        plan = plan_fefo_exit(product_id, quantidade, ignorar_vencidos=(motivo == 'Venda'))
         if plan is None:
-            return jsonify({'ok': False, 'message': 'Quantidade acima do disponível no estoque.'}), 400
+            if motivo == 'Venda':
+                mensagem = mensagem_venda_sem_estoque(product_id, product.get('nome') or 'Produto')
+            else:
+                mensagem = 'Quantidade acima do disponível no estoque.'
+            return jsonify({'ok': False, 'message': mensagem}), 400
 
         observacao = build_exit_note(motivo, payload.get('observacao'))
         data_movimentacao = agora().isoformat(timespec='seconds')
@@ -1678,12 +1713,9 @@ def create_sale():
         if product.get('ativo') is False:
             return jsonify({'ok': False, 'message': 'Produto inativo.'}), 400
         nome = product.get('nome') or 'Produto'
-        plan = plan_fefo_exit(product_id, quantidade)
+        plan = plan_fefo_exit(product_id, quantidade, ignorar_vencidos=True)
         if plan is None:
-            return jsonify({
-                'ok': False,
-                'message': f'Estoque insuficiente para {nome}. Nada foi gravado.'
-            }), 400
+            return jsonify({'ok': False, 'message': mensagem_venda_sem_estoque(product_id, nome)}), 400
         try:
             valor_unitario = parse_decimal(product.get('preco', 0))
         except ValueError:
