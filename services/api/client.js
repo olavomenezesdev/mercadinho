@@ -19,6 +19,30 @@ export function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => HTML_ESCAPES[character]);
 }
 
+// Quais páginas mostrar na paginação: a primeira, a última, a atual e uma de cada lado dela,
+// com '…' nos saltos. Ex.: (6, 400) -> [1, '…', 5, 6, 7, '…', 400]. No máximo 7 itens.
+// Quando o salto é de uma página só, mostra a página no lugar do '…' (ex.: 1, 2, 3 em vez de 1, …, 3).
+export function paginationItems(currentPage, totalPages) {
+  const total = Math.max(1, Math.floor(Number(totalPages) || 1));
+  const current = Math.min(total, Math.max(1, Math.floor(Number(currentPage) || 1)));
+  const pages = [...new Set([1, current - 1, current, current + 1, total])]
+    .filter((page) => page >= 1 && page <= total)
+    .sort((a, b) => a - b);
+
+  const items = [];
+  let previous = 0;
+  pages.forEach((page) => {
+    if (page - previous === 2) {
+      items.push(previous + 1);
+    } else if (page - previous > 2) {
+      items.push('…');
+    }
+    items.push(page);
+    previous = page;
+  });
+  return items;
+}
+
 export function getSessionUser() {
   const savedUser = localStorage.getItem(USER_STORAGE_KEY);
   if (!savedUser) {

@@ -1,4 +1,4 @@
-import apiClient, { escapeHtml } from '../services/api/client.js';
+import apiClient, { escapeHtml, paginationItems } from '../services/api/client.js';
 import './session.js';
 
 // Data e hora no formato brasileiro (dd/mm/aaaa hh:mm), no fuso do navegador.
@@ -49,13 +49,15 @@ const renderPainelPagination = (totalItems) => {
   const totalPages = Math.max(1, Math.ceil(totalItems / painelPageSize));
   currentPainelPage = Math.min(currentPainelPage, totalPages);
 
-  const pages = Array.from({ length: totalPages }, (_, index) => index + 1);
+  // Primeira, última, atual e vizinhas, com '…' nos saltos (no máximo 7 itens).
+  const pages = paginationItems(currentPainelPage, totalPages);
 
   pagination.innerHTML = `
     <button class="page-btn muted" type="button" data-page-action="prev" ${currentPainelPage === 1 ? 'disabled' : ''}>&lt;</button>
-    ${pages.map((page) => `
-      <button class="page-btn ${page === currentPainelPage ? 'active' : ''}" type="button" data-page="${page}">${page}</button>
-    `).join('')}
+    ${pages.map((page) => (page === '…'
+      ? '<span class="page-ellipsis" aria-hidden="true">…</span>'
+      : `<button class="page-btn ${page === currentPainelPage ? 'active' : ''}" type="button" data-page="${page}">${page}</button>`
+    )).join('')}
     <button class="page-btn" type="button" data-page-action="next" ${currentPainelPage === totalPages ? 'disabled' : ''}>&gt;</button>
   `;
 
