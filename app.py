@@ -1246,6 +1246,17 @@ def update_supplier(supplier_id):
     }), 200
 
 
+def validar_preco_e_estoque_minimo(preco, estoque_minimo):
+    """Mensagem de erro se preço ou estoque mínimo for negativo (ou não for um número), senão None."""
+    if not preco.is_finite() or not estoque_minimo.is_finite():
+        return 'Estoque mínimo ou preço inválido.'
+    if preco < 0:
+        return 'O preço não pode ser negativo.'
+    if estoque_minimo < 0:
+        return 'O estoque mínimo não pode ser negativo.'
+    return None
+
+
 @app.get('/api/produtos')
 @login_required
 @permissao_qualquer('produtos', 'entradas', 'saidas', 'caixa', 'painel', 'relatorios')
@@ -1325,6 +1336,9 @@ def create_product():
         preco = parse_decimal(payload.get('preco', 0))
     except ValueError:
         return jsonify({'ok': False, 'message': 'Estoque mínimo ou preço inválido.'}), 400
+    erro_valores = validar_preco_e_estoque_minimo(preco, estoque_minimo)
+    if erro_valores:
+        return jsonify({'ok': False, 'message': erro_valores}), 400
 
     product_payload = {
         'id_categoria': int(categoria_id),
@@ -1371,6 +1385,9 @@ def update_product(product_id):
         preco = parse_decimal(payload.get('preco', product.get('preco', 0)))
     except ValueError:
         return jsonify({'ok': False, 'message': 'Estoque mínimo ou preço inválido.'}), 400
+    erro_valores = validar_preco_e_estoque_minimo(preco, estoque_minimo)
+    if erro_valores:
+        return jsonify({'ok': False, 'message': erro_valores}), 400
 
     update_payload = {
         'id_categoria': int(categoria_id),

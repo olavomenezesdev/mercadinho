@@ -569,6 +569,51 @@ class EstoqueTests(unittest.TestCase):
         self.assertEqual(self.lote(103)['quantidade'], '1')
         self.assertEqual([(row['id_lote'], row['quantidade']) for row in self.saidas()], [(102, '4')])
 
+    # --- Preço e estoque mínimo não podem ser negativos ---
+
+    def criar_produto(self, **dados):
+        payload = {'nome': 'Feijão 1kg', 'id_categoria': 1, 'unidade_medida': 'un',
+                   'estoque_minimo': '2', 'preco': '8.50', **dados}
+        return self.client.post('/api/produtos', json=payload, headers=self.owner_headers)
+
+    def test_criar_produto_com_preco_negativo_e_recusado(self):
+        produtos_antes = len(self.db.rows('produto'))
+
+        response = self.criar_produto(preco='-1')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['message'], 'O preço não pode ser negativo.')
+        self.assertEqual(len(self.db.rows('produto')), produtos_antes)
+
+    def test_criar_produto_com_estoque_minimo_negativo_e_recusado(self):
+        produtos_antes = len(self.db.rows('produto'))
+
+        response = self.criar_produto(estoque_minimo='-0,5')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['message'], 'O estoque mínimo não pode ser negativo.')
+        self.assertEqual(len(self.db.rows('produto')), produtos_antes)
+
+    def test_criar_produto_com_zero_e_aceito(self):
+        self.assertEqual(self.criar_produto(preco='0', estoque_minimo='0').status_code, 200)
+
+    def test_editar_produto_com_preco_ou_estoque_minimo_negativo_e_recusado(self):
+        preco = self.client.put('/api/produtos/10', json={'preco': '-20'}, headers=self.owner_headers)
+        minimo = self.client.put('/api/produtos/10', json={'estoque_minimo': -3}, headers=self.owner_headers)
+
+        self.assertEqual(preco.status_code, 400)
+        self.assertEqual(preco.get_json()['message'], 'O preço não pode ser negativo.')
+        self.assertEqual(minimo.status_code, 400)
+        self.assertEqual(minimo.get_json()['message'], 'O estoque mínimo não pode ser negativo.')
+        produto = next(row for row in self.db.rows('produto') if row['id_produto'] == 10)
+        self.assertEqual((produto['preco'], produto['estoque_minimo']), ('20.00', '5'))
+
+    def test_produto_com_valor_que_nao_e_numero_e_recusado_sem_erro_500(self):
+        response = self.criar_produto(preco='NaN')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['message'], 'Estoque mínimo ou preço inválido.')
+
     def test_falha_em_uma_tabela_espera_as_outras_leituras_terminarem(self):
         # 'produto' falha na hora e 'lote' demora. A resposta só pode sair depois que a leitura
         # de 'lote' terminar; senão ela continua sozinha depois do fim da requisição.
