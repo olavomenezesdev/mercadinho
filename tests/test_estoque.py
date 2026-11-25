@@ -251,7 +251,8 @@ class EstoqueTests(unittest.TestCase):
         self.assertNotIn('Access-Control-Allow-Origin', externo.headers)
 
     def test_funcionario_do_caixa_registra_venda(self):
-        response = self.registrar_saida(11, 2, headers=self.cashier_headers, motivo='venda', observacao='Venda via caixa - PIX')
+        # Só 1 Leite está dentro da validade (o lote 102 venceu e não pode ser vendido).
+        response = self.registrar_saida(11, 1, headers=self.cashier_headers, motivo='venda', observacao='Venda via caixa - PIX')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()['motivo'], 'Venda')
@@ -270,15 +271,16 @@ class EstoqueTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
-        # Arroz: 3 do lote 100 + 2 do lote 101; Leite: 1 do lote 102 (vence primeiro).
+        # Arroz: 3 do lote 100 + 2 do lote 101; Leite: 1 do lote 103 (o 102 está vencido e fica intacto).
         self.assertEqual(payload['valor_total'], '105.00')
         self.assertEqual(len(payload['ids_movimentacao']), 3)
         self.assertEqual(self.lote(100)['quantidade'], '0')
         self.assertEqual(self.lote(101)['quantidade'], '8')
-        self.assertEqual(self.lote(102)['quantidade'], '3')
+        self.assertEqual(self.lote(102)['quantidade'], '4')
+        self.assertEqual(self.lote(103)['quantidade'], '0')
         self.assertEqual(
             [(row['id_lote'], row['quantidade']) for row in self.saidas()],
-            [(100, '3'), (101, '2'), (102, '1')]
+            [(100, '3'), (101, '2'), (103, '1')]
         )
         self.assertTrue(all(row['observacao'] == '[Venda] Venda via caixa - PIX' for row in self.saidas()))
         self.assertTrue(all(row['id_usuario'] == 2 for row in self.saidas()))
@@ -330,14 +332,14 @@ class EstoqueTests(unittest.TestCase):
         return next(item for item in items if item['id_movimentacao'] == movement_id)
 
     def test_mudar_o_preco_nao_muda_o_valor_de_venda_antiga(self):
-        movement_id = self.registrar_venda([{'id_produto': 11, 'quantidade': 2}]).get_json()['ids_movimentacao'][0]
+        movement_id = self.registrar_venda([{'id_produto': 11, 'quantidade': 1}]).get_json()['ids_movimentacao'][0]
 
         response = self.client.put('/api/produtos/11', json={'preco': '9.90'}, headers=self.owner_headers)
         self.assertEqual(response.status_code, 200)
 
         venda = self.movimentacao_listada(movement_id)
         self.assertEqual(venda['valor_unitario'], '5.00')
-        self.assertEqual(venda['valor_total'], '10.00')
+        self.assertEqual(venda['valor_total'], '5.00')
 
     def test_movimentacao_sem_valor_gravado_usa_o_preco_atual(self):
         # As entradas dos dados iniciais não têm valor gravado.
@@ -524,6 +526,93 @@ class EstoqueTests(unittest.TestCase):
         resposta = self.client.put('/api/usuarios/2', json={'ativo': False}, headers=self.owner_headers)
         self.assertEqual(resposta.status_code, 200)
         self.assertEqual(self.client.get('/api/produtos', headers=self.cashier_headers).status_code, 401)
+
+    # --- Lote vencido: não se vende, mas pode sair por Perda, Vencimento ou Avaria ---
+    # Leite (11): lote 102 venceu em 20/11 (4 un.); lote 103 vence em 28/11 (1 un.). Hoje é 23/11.
+
+    def test_venda_nao_usa_o_lote_vencido(self):
+        response = self.registrar_venda([{'id_produto': 11, 'quantidade': 1}])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.lote(102)['quantidade'], '4')
+        self.assertEqual(self.lote(103)['quantidade'], '0')
+        self.assertEqual([(row['id_lote'], row['quantidade']) for row in self.saidas()], [(103, '1')])
+
+    def test_venda_e_recusada_quando_so_sobra_lote_vencido(self):
+        self.registrar_venda([{'id_produto': 11, 'quantidade': 1}])  # vende a única unidade válida
+        saidas_antes = len(self.saidas())
+
+        response = self.registrar_venda([{'id_produto': 11, 'quantidade': 1}])
+
+        self.assertEqual(response.status_code, 400)
+        message = response.get_json()['message']
+        self.assertIn('Leite 1L', message)
+        self.assertIn('4 unidades vencidas', message)
+        self.assertIn('motivo Vencimento', message)
+        self.assertEqual(self.lote(102)['quantidade'], '4')
+        self.assertEqual(len(self.saidas()), saidas_antes)
+
+    def test_saida_de_venda_pela_tela_de_saidas_tambem_ignora_lote_vencido(self):
+        response = self.registrar_saida(11, 2, motivo='Venda')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('4 unidades vencidas', response.get_json()['message'])
+        self.assertEqual(self.saidas(), [])
+        self.assertEqual(self.lote(102)['quantidade'], '4')
+        self.assertEqual(self.lote(103)['quantidade'], '1')
+
+    def test_saida_com_motivo_vencimento_usa_o_lote_vencido(self):
+        response = self.registrar_saida(11, 4, motivo='Vencimento')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.lote(102)['quantidade'], '0')
+        self.assertEqual(self.lote(103)['quantidade'], '1')
+        self.assertEqual([(row['id_lote'], row['quantidade']) for row in self.saidas()], [(102, '4')])
+
+    # --- Preço e estoque mínimo não podem ser negativos ---
+
+    def criar_produto(self, **dados):
+        payload = {'nome': 'Feijão 1kg', 'id_categoria': 1, 'unidade_medida': 'un',
+                   'estoque_minimo': '2', 'preco': '8.50', **dados}
+        return self.client.post('/api/produtos', json=payload, headers=self.owner_headers)
+
+    def test_criar_produto_com_preco_negativo_e_recusado(self):
+        produtos_antes = len(self.db.rows('produto'))
+
+        response = self.criar_produto(preco='-1')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['message'], 'O preço não pode ser negativo.')
+        self.assertEqual(len(self.db.rows('produto')), produtos_antes)
+
+    def test_criar_produto_com_estoque_minimo_negativo_e_recusado(self):
+        produtos_antes = len(self.db.rows('produto'))
+
+        response = self.criar_produto(estoque_minimo='-0,5')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['message'], 'O estoque mínimo não pode ser negativo.')
+        self.assertEqual(len(self.db.rows('produto')), produtos_antes)
+
+    def test_criar_produto_com_zero_e_aceito(self):
+        self.assertEqual(self.criar_produto(preco='0', estoque_minimo='0').status_code, 200)
+
+    def test_editar_produto_com_preco_ou_estoque_minimo_negativo_e_recusado(self):
+        preco = self.client.put('/api/produtos/10', json={'preco': '-20'}, headers=self.owner_headers)
+        minimo = self.client.put('/api/produtos/10', json={'estoque_minimo': -3}, headers=self.owner_headers)
+
+        self.assertEqual(preco.status_code, 400)
+        self.assertEqual(preco.get_json()['message'], 'O preço não pode ser negativo.')
+        self.assertEqual(minimo.status_code, 400)
+        self.assertEqual(minimo.get_json()['message'], 'O estoque mínimo não pode ser negativo.')
+        produto = next(row for row in self.db.rows('produto') if row['id_produto'] == 10)
+        self.assertEqual((produto['preco'], produto['estoque_minimo']), ('20.00', '5'))
+
+    def test_produto_com_valor_que_nao_e_numero_e_recusado_sem_erro_500(self):
+        response = self.criar_produto(preco='NaN')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()['message'], 'Estoque mínimo ou preço inválido.')
 
     def test_falha_em_uma_tabela_espera_as_outras_leituras_terminarem(self):
         # 'produto' falha na hora e 'lote' demora. A resposta só pode sair depois que a leitura
