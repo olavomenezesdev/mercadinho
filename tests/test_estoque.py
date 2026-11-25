@@ -1,6 +1,7 @@
 """Testes das regras de estoque com banco em memória (não usam o Supabase real)."""
 
 import logging
+import time
 import unittest
 from datetime import date, datetime
 from unittest.mock import patch
@@ -523,6 +524,35 @@ class EstoqueTests(unittest.TestCase):
         resposta = self.client.put('/api/usuarios/2', json={'ativo': False}, headers=self.owner_headers)
         self.assertEqual(resposta.status_code, 200)
         self.assertEqual(self.client.get('/api/produtos', headers=self.cashier_headers).status_code, 401)
+
+    def test_falha_em_uma_tabela_espera_as_outras_leituras_terminarem(self):
+        # 'produto' falha na hora e 'lote' demora. A resposta só pode sair depois que a leitura
+        # de 'lote' terminar; senão ela continua sozinha depois do fim da requisição.
+        terminou = []
+        original = self.db.table
+
+        def table(nome):
+            consulta = original(nome)
+            if nome == 'lote':
+                executar = consulta.execute
+
+                def execute_lento():
+                    time.sleep(0.2)
+                    resultado = executar()
+                    terminou.append(nome)
+                    return resultado
+
+                consulta.execute = execute_lento
+            return consulta
+
+        self.db.table = table
+        self.addCleanup(setattr, self.db, 'table', original)
+        self.db.fail_on('produto', 'select')
+
+        response = self.client.get('/api/produtos', headers=self.owner_headers)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(terminou, ['lote'])
 
 
 if __name__ == '__main__':

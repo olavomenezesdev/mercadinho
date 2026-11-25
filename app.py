@@ -3,7 +3,7 @@ import os
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from functools import wraps
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta, timezone
@@ -261,6 +261,9 @@ def buscar_tabelas(*tabelas):
     faltando = [t for t in dict.fromkeys(tabelas) if _chave_consulta(t, '*', {}) not in memoria]
     # Nas threads não há requisição ativa, então safe_query vai direto ao banco.
     futuros = {t: _executor_consultas.submit(safe_query, t, '*') for t in faltando}
+    # Espera TODAS terminarem antes de repassar um erro: nenhuma leitura pode continuar
+    # rodando sozinha depois que a requisição acabar.
+    wait(futuros.values())
     for tabela, futuro in futuros.items():
         memoria[_chave_consulta(tabela, '*', {})] = futuro.result()
 
