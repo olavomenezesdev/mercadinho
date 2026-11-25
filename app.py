@@ -1,6 +1,9 @@
 import logging
 import os
 import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from functools import wraps
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta, timezone
@@ -198,7 +201,7 @@ else:
     supabase = None
 
 
-def safe_query(table_name, select='*', **kwargs):
+def _consulta_no_banco(table_name, select='*', **kwargs):
     if not supabase:
         raise BancoIndisponivel('Banco não configurado.')
 
@@ -214,6 +217,55 @@ def safe_query(table_name, select='*', **kwargs):
         raise BancoIndisponivel(
             'Não foi possível acessar o banco de dados. Verifique a conexão e tente novamente.'
         ) from error
+
+
+def _memoria_da_requisicao():
+    """Guarda o resultado das leituras de uma requisição GET para não repetir a mesma consulta."""
+    try:
+        if request.method != 'GET':
+            return None
+        if not hasattr(g, '_consultas'):
+            g._consultas = {}
+        return g._consultas
+    except RuntimeError:  # fora de uma requisição (scripts e testes)
+        return None
+
+
+def _chave_consulta(table_name, select, kwargs):
+    return (table_name, select, tuple(sorted((k, str(v)) for k, v in kwargs.items() if v is not None)))
+
+
+def safe_query(table_name, select='*', **kwargs):
+    memoria = _memoria_da_requisicao()
+    chave = _chave_consulta(table_name, select, kwargs)
+    if memoria is not None and chave in memoria:
+        return memoria[chave]
+    itens = _consulta_no_banco(table_name, select, **kwargs)
+    if memoria is not None:
+        memoria[chave] = itens
+    return itens
+
+
+_executor_consultas = ThreadPoolExecutor(max_workers=8)
+
+
+def buscar_tabelas(*tabelas):
+    """Lê várias tabelas inteiras ao mesmo tempo (em paralelo) e guarda para o resto da requisição.
+
+    Cada consulta ao Supabase leva uma ida e volta pela internet; feitas uma depois da outra,
+    o tempo soma. Em paralelo, a espera é a da consulta mais lenta.
+    """
+    memoria = _memoria_da_requisicao()
+    if memoria is None:
+        return
+    faltando = [t for t in dict.fromkeys(tabelas) if _chave_consulta(t, '*', {}) not in memoria]
+    # Nas threads não há requisição ativa, então safe_query vai direto ao banco.
+    futuros = {t: _executor_consultas.submit(safe_query, t, '*') for t in faltando}
+    # Espera TODAS terminarem antes de repassar um erro: nenhuma leitura pode continuar
+    # rodando sozinha depois que a requisição acabar.
+    wait(futuros.values())
+    for tabela, futuro in futuros.items():
+        memoria[_chave_consulta(tabela, '*', {})] = futuro.result()
 
 
 def safe_insert(table_name, payload):
@@ -324,10 +376,42 @@ def usuario_do_token(request):
     if not isinstance(identity, dict) or identity.get('id_usuario') is None:
         return None
 
-    users = safe_query('usuario', '*', id_usuario=identity['id_usuario'])
-    if not users or not bool(users[0].get('ativo', False)):
+    user = _usuario_em_cache(identity['id_usuario'])
+    if user is None:
+        users = safe_query('usuario', '*', id_usuario=identity['id_usuario'])
+        if not users:
+            return None
+        user = users[0]
+        _guardar_usuario(identity['id_usuario'], user)
+    if not bool(user.get('ativo', False)):
         return None
-    return users[0]
+    return user
+
+
+# O usuário do token fica guardado por pouco tempo para não ir ao banco em toda chamada.
+# Mudanças feitas na tela Usuários limpam o cache na hora; feitas direto no Supabase
+# ou por outro servidor, valem em até USUARIO_CACHE_SEGUNDOS.
+USUARIO_CACHE_SEGUNDOS = 30
+_cache_usuarios = {}
+_trava_cache_usuarios = threading.Lock()
+
+
+def _usuario_em_cache(id_usuario):
+    with _trava_cache_usuarios:
+        item = _cache_usuarios.get(str(id_usuario))
+        if item and item[1] > time.monotonic():
+            return item[0]
+    return None
+
+
+def _guardar_usuario(id_usuario, user):
+    with _trava_cache_usuarios:
+        _cache_usuarios[str(id_usuario)] = (user, time.monotonic() + USUARIO_CACHE_SEGUNDOS)
+
+
+def limpar_cache_usuarios():
+    with _trava_cache_usuarios:
+        _cache_usuarios.clear()
 
 
 def _normalize_permissions(raw_permissions, default_permissions=None):
@@ -949,6 +1033,7 @@ def update_user(user_id):
     except Exception:
         return jsonify({'ok': False, 'message': 'Não foi possível atualizar o usuário.'}), 500
 
+    limpar_cache_usuarios()
     return jsonify({
         'ok': True,
         'message': 'Usuário atualizado com sucesso.',
@@ -1134,6 +1219,7 @@ def update_supplier(supplier_id):
 @login_required
 @permissao_qualquer('produtos', 'entradas', 'saidas', 'caixa', 'painel', 'relatorios')
 def list_products():
+    buscar_tabelas('produto', 'categoria', 'lote')
     items = safe_query('produto', '*')
     search = str(request.args.get('search') or '').strip().lower()
 
@@ -1305,6 +1391,7 @@ def delete_product(product_id):
 @login_required
 @permissao_qualquer('entradas', 'saidas', 'relatorios', 'painel')
 def list_movements():
+    buscar_tabelas('movimentacao', 'produto', 'categoria', 'lote', 'fornecedor')
     items = safe_query('movimentacao', '*')
     usuario = g.usuario_autenticado
     permissions = _user_permissions(usuario)
@@ -1632,6 +1719,7 @@ def create_sale():
 @login_required
 @permissao_qualquer('painel', 'entradas', 'saidas', 'caixa', 'relatorios')
 def list_lots():
+    buscar_tabelas('lote', 'produto')
     items = safe_query('lote', '*')
     product_map = get_product_map()
     enriched = []
@@ -1650,6 +1738,7 @@ def list_lots():
 @login_required
 @permissao_qualquer('painel', 'relatorios')
 def list_alerts():
+    buscar_tabelas('produto', 'lote')
     generated = build_product_alerts()
     return jsonify({'items': generated}), 200
 
@@ -1658,6 +1747,7 @@ def list_alerts():
 @login_required
 @permissao('relatorios')
 def list_reports():
+    buscar_tabelas('produto', 'lote')
     alerts = build_product_alerts()
     products = safe_query('produto', '*')
     stock_map = get_stock_map()

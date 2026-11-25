@@ -12,6 +12,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 class MercadinhoAppTests(unittest.TestCase):
     def setUp(self):
+        app_module.limpar_cache_usuarios()
         self.client = app.test_client()
         self.original_secret_key = app.config.get('SECRET_KEY')
         app.config['SECRET_KEY'] = 'test-only-secret-key'
@@ -362,6 +363,7 @@ class MercadinhoAppTests(unittest.TestCase):
 
 class AuthenticationTests(unittest.TestCase):
     def setUp(self):
+        app_module.limpar_cache_usuarios()
         self.client = app.test_client()
         self.original_secret_key = app.config.get('SECRET_KEY')
         app.config['SECRET_KEY'] = 'test-only-secret-key'
