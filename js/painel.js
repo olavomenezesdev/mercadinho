@@ -156,7 +156,7 @@ const renderMovementRows = async () => {
 
   painelTableBody.innerHTML = `
     <tr>
-      <td colspan="6" class="empty-state-cell">Carregando movimentações...</td>
+      <td colspan="5" class="empty-state-cell">Carregando movimentações...</td>
     </tr>
   `;
 
@@ -170,7 +170,7 @@ const renderMovementRows = async () => {
     if (!filteredItems.length) {
       painelTableBody.innerHTML = `
         <tr>
-          <td colspan="6" class="empty-state-cell">Nenhuma movimentação encontrada com os filtros selecionados.</td>
+          <td colspan="5" class="empty-state-cell">Nenhuma movimentação encontrada com os filtros selecionados.</td>
         </tr>
       `;
       renderPainelPagination(0);
@@ -195,7 +195,6 @@ const renderMovementRows = async () => {
           <td>${escapeHtml(produto)}</td>
           <td>${escapeHtml(quantidade)}</td>
           <td>${escapeHtml(observacao)}</td>
-          <td class="arrow-col">→</td>
         </tr>
       `;
     }).join('');
@@ -204,7 +203,7 @@ const renderMovementRows = async () => {
   } catch (error) {
     painelTableBody.innerHTML = `
       <tr>
-        <td colspan="6" class="empty-state-cell">Não foi possível carregar as movimentações.</td>
+        <td colspan="5" class="empty-state-cell">Não foi possível carregar as movimentações.</td>
       </tr>
     `;
     renderPainelPagination(0);

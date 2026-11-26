@@ -629,11 +629,6 @@ tbody tr:last-child td {
   color: var(--primary);
 }
 
-.arrow-col {
-  width: 22px;
-  text-align: center;
-}
-
 .table-footer {
   margin-top: 16px;
   display: flex;

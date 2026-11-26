@@ -45,6 +45,55 @@ document.addEventListener('DOMContentLoaded', async () => {
   const formatDay = (date) =>
     new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(date);
 
+  // Tabela "Estoque com validade próxima": mostra 5 lotes e o botão alterna para todos.
+  const EXPIRATION_PREVIEW = 5;
+  let expirationLots = [];
+  let showAllExpirations = false;
+
+  const renderExpirationTable = () => {
+    const expirationTableBody = document.getElementById('expiration-table-body');
+    const toggle = document.getElementById('expiration-toggle');
+    if (!expirationTableBody) return;
+
+    if (toggle) {
+      toggle.hidden = expirationLots.length <= EXPIRATION_PREVIEW;
+      toggle.textContent = showAllExpirations ? 'Ver menos' : 'Ver todos';
+      toggle.setAttribute('aria-expanded', String(showAllExpirations));
+    }
+
+    const visible = showAllExpirations ? expirationLots : expirationLots.slice(0, EXPIRATION_PREVIEW);
+    if (!visible.length) {
+      expirationTableBody.innerHTML = `
+        <tr>
+          <td colspan="4" class="empty-state-row">Nenhuma validade próxima.</td>
+        </tr>
+      `;
+      return;
+    }
+
+    expirationTableBody.innerHTML = visible.map((lot) => {
+      const productName = lot.produto || 'Produto';
+      return `
+        <tr>
+          <td>
+            <span class="product-cell">
+              <span class="thumb thumb-1"></span>
+              ${escapeHtml(productName)}
+            </span>
+          </td>
+          <td>${escapeHtml(lot.id_lote || 'Lote')}</td>
+          <td>${escapeHtml(formatDateBR(lot.validade))}${lot.tipo === 'LOTE_VENCIDO' ? ' (vencido)' : ''}</td>
+          <td>${numberFormat(lot.quantidade)}</td>
+        </tr>
+      `;
+    }).join('');
+  };
+
+  document.getElementById('expiration-toggle')?.addEventListener('click', () => {
+    showAllExpirations = !showAllExpirations;
+    renderExpirationTable();
+  });
+
   const renderReports = async () => {
     try {
       const [productsResponse, movementsResponse, alertsResponse] = await Promise.all([
@@ -74,7 +123,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         return sum + value;
       }, 0);
       const productsSold = new Set(salesMovements.map((item) => item.id_produto)).size;
-      const avgTicket = salesMovements.length ? totalRevenue / salesMovements.length : 0;
+      // Valor total vendido ÷ unidades vendidas (um item que sai de dois lotes não conta duas vezes).
+      const avgUnitPrice = totalSalesUnits ? totalRevenue / totalSalesUnits : 0;
       const lowStockAlerts = products.filter((item) => (
         item.ativo !== false && Number(item.estoque_atual || 0) <= Number(item.estoque_minimo || 0)
       ));
@@ -83,13 +133,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (statCards.length >= 4) {
         statCards[0].querySelector('.stat-value').textContent = moneyFormat(totalRevenue);
         statCards[1].querySelector('.stat-value').textContent = numberFormat(productsSold || totalSalesUnits);
-        statCards[2].querySelector('.stat-value').textContent = moneyFormat(avgTicket);
+        statCards[2].querySelector('.stat-value').textContent = moneyFormat(avgUnitPrice);
         statCards[3].querySelector('.stat-value').textContent = numberFormat(lowStockAlerts.length);
 
         const tags = statCards[0].querySelector('.mini-tag');
         if (tags) tags.textContent = `${numberFormat(totalSalesUnits)} itens`;
-        statCards[1].querySelector('.mini-tag').textContent = `${numberFormat(products.length)} itens`;
-        statCards[2].querySelector('.mini-tag').textContent = `${numberFormat(salesMovements.length)} vendas`;
+        statCards[1].querySelector('.mini-tag').textContent = `de ${numberFormat(products.length)} cadastrados`;
+        statCards[2].querySelector('.mini-tag').textContent = `${numberFormat(totalSalesUnits)} unidades vendidas`;
         statCards[3].querySelector('.mini-tag').textContent = lowStockAlerts.length ? 'Atenção' : 'Sem alerta';
         statCards[3].classList.toggle('warning', lowStockAlerts.length > 0);
       }
@@ -127,66 +177,53 @@ document.addEventListener('DOMContentLoaded', async () => {
       const donutChart = document.getElementById('donut-chart');
       const donutCenter = document.getElementById('donut-center');
       if (categoryLegend && donutChart && donutCenter) {
-        const categoryTotals = products.reduce((acc, product) => {
-          const categoryName = product.categoria || 'Sem categoria';
-          acc[categoryName] = (acc[categoryName] || 0) + 1;
+        // Pelas vendas (saídas com motivo Venda): soma das unidades vendidas por categoria.
+        const categoryTotals = salesMovements.reduce((acc, item) => {
+          const categoryName = item.categoria || 'Sem categoria';
+          acc[categoryName] = (acc[categoryName] || 0) + Number(item.quantidade || 0);
           return acc;
         }, {});
 
-        const entries = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]).slice(0, 5);
-        const total = entries.reduce((sum, [, value]) => sum + value, 0) || 1;
         const palette = ['#D9480F', '#EDA86B', '#F4C389', '#7A9D6E', '#D9D3C8'];
-        let cursor = 0;
-        const gradient = entries.map(([, value], index) => {
-          const start = cursor;
-          const end = cursor + (value / total) * 100;
-          cursor = end;
-          return `${palette[index % palette.length]} ${start}% ${end}%`;
-        }).join(', ');
+        const sorted = Object.entries(categoryTotals)
+          .filter(([, value]) => value > 0)
+          .sort((a, b) => b[1] - a[1]);
+        // Até 5 fatias; acima disso, as 4 maiores e o resto em "Outras", para somar 100%.
+        const entries = sorted.length > palette.length
+          ? [...sorted.slice(0, palette.length - 1),
+            ['Outras', sorted.slice(palette.length - 1).reduce((sum, [, value]) => sum + value, 0)]]
+          : sorted;
+        const total = entries.reduce((sum, [, value]) => sum + value, 0);
 
-        donutChart.style.background = `conic-gradient(${gradient})`;
-        donutCenter.innerHTML = `<strong>${total}</strong><span>produtos</span>`;
-        categoryLegend.innerHTML = entries.map(([name, value], index) => `
-          <li>
-            <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot" style="background:${palette[index % palette.length]};"></span>${escapeHtml(name)}</span>
-            <strong>${Math.round((value / total) * 100)}%</strong>
-          </li>
-        `).join('');
-      }
+        donutCenter.innerHTML = `<strong>${numberFormat(total)}</strong><span>unidades</span>`;
 
-      const expirationTableBody = document.getElementById('expiration-table-body');
-      if (expirationTableBody) {
-        // Mesma regra do servidor: lotes com saldo vencidos ou dentro do prazo de aviso.
-        const upcoming = (Array.isArray(alertsPayload?.items) ? alertsPayload.items : [])
-          .filter((alert) => alert.tipo === 'VALIDADE_PROXIMA' || alert.tipo === 'LOTE_VENCIDO')
-          .sort((a, b) => Number(a.dias_para_vencer ?? 0) - Number(b.dias_para_vencer ?? 0))
-          .slice(0, 5);
-
-        if (!upcoming.length) {
-          expirationTableBody.innerHTML = `
-            <tr>
-              <td colspan="4" class="empty-state-row">Nenhuma validade próxima.</td>
-            </tr>
-          `;
+        if (!total) {
+          donutChart.style.background = palette[palette.length - 1];
+          categoryLegend.innerHTML = '<li><span>Sem vendas ainda</span></li>';
         } else {
-          expirationTableBody.innerHTML = upcoming.map((lot) => {
-            const productName = lot.produto || 'Produto';
-            return `
-              <tr>
-                <td>
-                  <span class="product-cell">
-                    <span class="thumb thumb-1"></span>
-                    ${escapeHtml(productName)}
-                  </span>
-                </td>
-                <td>${escapeHtml(lot.id_lote || 'Lote')}</td>
-                <td>${escapeHtml(formatDateBR(lot.validade))}${lot.tipo === 'LOTE_VENCIDO' ? ' (vencido)' : ''}</td>
-                <td>${numberFormat(lot.quantidade)}</td>
-              </tr>
-            `;
-          }).join('');
+          let cursor = 0;
+          const gradient = entries.map(([, value], index) => {
+            const start = cursor;
+            const end = cursor + (value / total) * 100;
+            cursor = end;
+            return `${palette[index % palette.length]} ${start}% ${end}%`;
+          }).join(', ');
+
+          donutChart.style.background = `conic-gradient(${gradient})`;
+          categoryLegend.innerHTML = entries.map(([name, value], index) => `
+            <li>
+              <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot" style="background:${palette[index % palette.length]};"></span>${escapeHtml(name)}</span>
+              <strong>${Math.round((value / total) * 100)}%</strong>
+            </li>
+          `).join('');
         }
       }
+
+      // Mesma regra do servidor: lotes com saldo vencidos ou dentro do prazo de aviso.
+      expirationLots = (Array.isArray(alertsPayload?.items) ? alertsPayload.items : [])
+        .filter((alert) => alert.tipo === 'VALIDADE_PROXIMA' || alert.tipo === 'LOTE_VENCIDO')
+        .sort((a, b) => Number(a.dias_para_vencer ?? 0) - Number(b.dias_para_vencer ?? 0));
+      renderExpirationTable();
 
       const movementSummary = document.getElementById('movement-summary');
       if (movementSummary) {
