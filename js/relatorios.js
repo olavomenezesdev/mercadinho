@@ -128,31 +128,46 @@ document.addEventListener('DOMContentLoaded', async () => {
       const donutChart = document.getElementById('donut-chart');
       const donutCenter = document.getElementById('donut-center');
       if (categoryLegend && donutChart && donutCenter) {
-        const categoryTotals = products.reduce((acc, product) => {
-          const categoryName = product.categoria || 'Sem categoria';
-          acc[categoryName] = (acc[categoryName] || 0) + 1;
+        // Pelas vendas (saídas com motivo Venda): soma das unidades vendidas por categoria.
+        const categoryTotals = salesMovements.reduce((acc, item) => {
+          const categoryName = item.categoria || 'Sem categoria';
+          acc[categoryName] = (acc[categoryName] || 0) + Number(item.quantidade || 0);
           return acc;
         }, {});
 
-        const entries = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]).slice(0, 5);
-        const total = entries.reduce((sum, [, value]) => sum + value, 0) || 1;
         const palette = ['#D9480F', '#EDA86B', '#F4C389', '#7A9D6E', '#D9D3C8'];
-        let cursor = 0;
-        const gradient = entries.map(([, value], index) => {
-          const start = cursor;
-          const end = cursor + (value / total) * 100;
-          cursor = end;
-          return `${palette[index % palette.length]} ${start}% ${end}%`;
-        }).join(', ');
+        const sorted = Object.entries(categoryTotals)
+          .filter(([, value]) => value > 0)
+          .sort((a, b) => b[1] - a[1]);
+        // Até 5 fatias; acima disso, as 4 maiores e o resto em "Outras", para somar 100%.
+        const entries = sorted.length > palette.length
+          ? [...sorted.slice(0, palette.length - 1),
+            ['Outras', sorted.slice(palette.length - 1).reduce((sum, [, value]) => sum + value, 0)]]
+          : sorted;
+        const total = entries.reduce((sum, [, value]) => sum + value, 0);
 
-        donutChart.style.background = `conic-gradient(${gradient})`;
-        donutCenter.innerHTML = `<strong>${total}</strong><span>produtos</span>`;
-        categoryLegend.innerHTML = entries.map(([name, value], index) => `
-          <li>
-            <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot" style="background:${palette[index % palette.length]};"></span>${escapeHtml(name)}</span>
-            <strong>${Math.round((value / total) * 100)}%</strong>
-          </li>
-        `).join('');
+        donutCenter.innerHTML = `<strong>${numberFormat(total)}</strong><span>unidades</span>`;
+
+        if (!total) {
+          donutChart.style.background = palette[palette.length - 1];
+          categoryLegend.innerHTML = '<li><span>Sem vendas ainda</span></li>';
+        } else {
+          let cursor = 0;
+          const gradient = entries.map(([, value], index) => {
+            const start = cursor;
+            const end = cursor + (value / total) * 100;
+            cursor = end;
+            return `${palette[index % palette.length]} ${start}% ${end}%`;
+          }).join(', ');
+
+          donutChart.style.background = `conic-gradient(${gradient})`;
+          categoryLegend.innerHTML = entries.map(([name, value], index) => `
+            <li>
+              <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot" style="background:${palette[index % palette.length]};"></span>${escapeHtml(name)}</span>
+              <strong>${Math.round((value / total) * 100)}%</strong>
+            </li>
+          `).join('');
+        }
       }
 
       const expirationTableBody = document.getElementById('expiration-table-body');
