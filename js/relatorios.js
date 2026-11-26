@@ -45,6 +45,55 @@ document.addEventListener('DOMContentLoaded', async () => {
   const formatDay = (date) =>
     new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' }).format(date);
 
+  // Tabela "Estoque com validade próxima": mostra 5 lotes e o botão alterna para todos.
+  const EXPIRATION_PREVIEW = 5;
+  let expirationLots = [];
+  let showAllExpirations = false;
+
+  const renderExpirationTable = () => {
+    const expirationTableBody = document.getElementById('expiration-table-body');
+    const toggle = document.getElementById('expiration-toggle');
+    if (!expirationTableBody) return;
+
+    if (toggle) {
+      toggle.hidden = expirationLots.length <= EXPIRATION_PREVIEW;
+      toggle.textContent = showAllExpirations ? 'Ver menos' : 'Ver todos';
+      toggle.setAttribute('aria-expanded', String(showAllExpirations));
+    }
+
+    const visible = showAllExpirations ? expirationLots : expirationLots.slice(0, EXPIRATION_PREVIEW);
+    if (!visible.length) {
+      expirationTableBody.innerHTML = `
+        <tr>
+          <td colspan="4" class="empty-state-row">Nenhuma validade próxima.</td>
+        </tr>
+      `;
+      return;
+    }
+
+    expirationTableBody.innerHTML = visible.map((lot) => {
+      const productName = lot.produto || 'Produto';
+      return `
+        <tr>
+          <td>
+            <span class="product-cell">
+              <span class="thumb thumb-1"></span>
+              ${escapeHtml(productName)}
+            </span>
+          </td>
+          <td>${escapeHtml(lot.id_lote || 'Lote')}</td>
+          <td>${escapeHtml(formatDateBR(lot.validade))}${lot.tipo === 'LOTE_VENCIDO' ? ' (vencido)' : ''}</td>
+          <td>${numberFormat(lot.quantidade)}</td>
+        </tr>
+      `;
+    }).join('');
+  };
+
+  document.getElementById('expiration-toggle')?.addEventListener('click', () => {
+    showAllExpirations = !showAllExpirations;
+    renderExpirationTable();
+  });
+
   const renderReports = async () => {
     try {
       const [productsResponse, movementsResponse, alertsResponse] = await Promise.all([
@@ -170,39 +219,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
 
-      const expirationTableBody = document.getElementById('expiration-table-body');
-      if (expirationTableBody) {
-        // Mesma regra do servidor: lotes com saldo vencidos ou dentro do prazo de aviso.
-        const upcoming = (Array.isArray(alertsPayload?.items) ? alertsPayload.items : [])
-          .filter((alert) => alert.tipo === 'VALIDADE_PROXIMA' || alert.tipo === 'LOTE_VENCIDO')
-          .sort((a, b) => Number(a.dias_para_vencer ?? 0) - Number(b.dias_para_vencer ?? 0))
-          .slice(0, 5);
-
-        if (!upcoming.length) {
-          expirationTableBody.innerHTML = `
-            <tr>
-              <td colspan="4" class="empty-state-row">Nenhuma validade próxima.</td>
-            </tr>
-          `;
-        } else {
-          expirationTableBody.innerHTML = upcoming.map((lot) => {
-            const productName = lot.produto || 'Produto';
-            return `
-              <tr>
-                <td>
-                  <span class="product-cell">
-                    <span class="thumb thumb-1"></span>
-                    ${escapeHtml(productName)}
-                  </span>
-                </td>
-                <td>${escapeHtml(lot.id_lote || 'Lote')}</td>
-                <td>${escapeHtml(formatDateBR(lot.validade))}${lot.tipo === 'LOTE_VENCIDO' ? ' (vencido)' : ''}</td>
-                <td>${numberFormat(lot.quantidade)}</td>
-              </tr>
-            `;
-          }).join('');
-        }
-      }
+      // Mesma regra do servidor: lotes com saldo vencidos ou dentro do prazo de aviso.
+      expirationLots = (Array.isArray(alertsPayload?.items) ? alertsPayload.items : [])
+        .filter((alert) => alert.tipo === 'VALIDADE_PROXIMA' || alert.tipo === 'LOTE_VENCIDO')
+        .sort((a, b) => Number(a.dias_para_vencer ?? 0) - Number(b.dias_para_vencer ?? 0));
+      renderExpirationTable();
 
       const movementSummary = document.getElementById('movement-summary');
       if (movementSummary) {
