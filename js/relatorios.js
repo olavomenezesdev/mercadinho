@@ -74,7 +74,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         return sum + value;
       }, 0);
       const productsSold = new Set(salesMovements.map((item) => item.id_produto)).size;
-      const avgTicket = salesMovements.length ? totalRevenue / salesMovements.length : 0;
+      // Valor total vendido ÷ unidades vendidas (um item que sai de dois lotes não conta duas vezes).
+      const avgUnitPrice = totalSalesUnits ? totalRevenue / totalSalesUnits : 0;
       const lowStockAlerts = products.filter((item) => (
         item.ativo !== false && Number(item.estoque_atual || 0) <= Number(item.estoque_minimo || 0)
       ));
@@ -83,13 +84,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (statCards.length >= 4) {
         statCards[0].querySelector('.stat-value').textContent = moneyFormat(totalRevenue);
         statCards[1].querySelector('.stat-value').textContent = numberFormat(productsSold || totalSalesUnits);
-        statCards[2].querySelector('.stat-value').textContent = moneyFormat(avgTicket);
+        statCards[2].querySelector('.stat-value').textContent = moneyFormat(avgUnitPrice);
         statCards[3].querySelector('.stat-value').textContent = numberFormat(lowStockAlerts.length);
 
         const tags = statCards[0].querySelector('.mini-tag');
         if (tags) tags.textContent = `${numberFormat(totalSalesUnits)} itens`;
         statCards[1].querySelector('.mini-tag').textContent = `${numberFormat(products.length)} itens`;
-        statCards[2].querySelector('.mini-tag').textContent = `${numberFormat(salesMovements.length)} itens vendidos`;
+        statCards[2].querySelector('.mini-tag').textContent = `${numberFormat(totalSalesUnits)} unidades vendidas`;
         statCards[3].querySelector('.mini-tag').textContent = lowStockAlerts.length ? 'Atenção' : 'Sem alerta';
         statCards[3].classList.toggle('warning', lowStockAlerts.length > 0);
       }
