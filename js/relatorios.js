@@ -89,7 +89,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const tags = statCards[0].querySelector('.mini-tag');
         if (tags) tags.textContent = `${numberFormat(totalSalesUnits)} itens`;
-        statCards[1].querySelector('.mini-tag').textContent = `${numberFormat(products.length)} itens`;
+        statCards[1].querySelector('.mini-tag').textContent = `de ${numberFormat(products.length)} cadastrados`;
         statCards[2].querySelector('.mini-tag').textContent = `${numberFormat(totalSalesUnits)} unidades vendidas`;
         statCards[3].querySelector('.mini-tag').textContent = lowStockAlerts.length ? 'Atenção' : 'Sem alerta';
         statCards[3].classList.toggle('warning', lowStockAlerts.length > 0);
